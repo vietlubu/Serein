@@ -420,9 +420,12 @@ x86-64 AppImage in a writable directory on a filesystem supporting hard links.
 AppImages retain their original filename, validate the Type 2 ELF architecture,
 and atomically replace the outer image after shutdown. An immediate launch failure
 restores the previous image; the two-second check is not an application-health test.
-macOS checks
-strict code-signature validity, the existing publisher's TeamIdentifier and bundle
-identifier, and Gatekeeper acceptance. Windows currently relies on the repository's
+macOS checks strict code-signature validity and that the update's bundle identifier and
+TeamIdentifier match the installed app. This fork publishes ad-hoc signed builds without a
+TeamIdentifier or notarization, so Gatekeeper is not consulted and macOS relies on the same
+HTTPS/checksum trust boundary as Windows; a Developer ID install still rejects an ad-hoc update.
+Ad-hoc signatures change every build, so macOS may ask again for keychain, microphone or
+screen-recording access after an update. Windows currently relies on the repository's
 HTTPS/checksum trust boundary because its published packages are unsigned. When
 installed via the per-user installer (`%LOCALAPPDATA%\Programs\Serein`), write
 permissions are maintained without administrator elevation, and the update helper
