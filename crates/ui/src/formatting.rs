@@ -116,6 +116,43 @@ pub fn apply(
 	))
 }
 
+/// Pasting a lone http(s) URL over a single-line selection writes `[selection](url)`, like Discord.
+/// On success the paste event is consumed and the caret after the link is returned; otherwise
+/// egui handles the paste as plain text.
+pub fn paste_link(
+	events: &mut Vec<egui::Event>,
+	draft: &mut String,
+	range: Option<CCursorRange>,
+	remaining: usize,
+	editing: bool,
+) -> Option<usize> {
+	let sorted = range?.as_sorted_char_range();
+	let (start, end) = (sorted.start.0, sorted.end.0);
+	let label = draft.get(char_to_byte(draft, start)..char_to_byte(draft, end))?;
+	// A selected URL is simply replaced, as before.
+	if label.is_empty()
+		|| label.contains(['\n', '[', ']'])
+		|| crate::markdown::external_url(label.trim()).is_some()
+	{
+		return None;
+	}
+	let at = events
+		.iter()
+		.position(|event| matches!(event, egui::Event::Paste(_)))?;
+	let egui::Event::Paste(pasted) = &events[at] else {
+		return None;
+	};
+	let url = pasted.trim();
+	if url.contains(char::is_whitespace) || crate::markdown::external_url(url).is_none() {
+		return None;
+	}
+	// Keep the pasted URL verbatim; `external_url` normalizes (e.g. adds a trailing `/`).
+	let link = format!("[{label}]({url})");
+	let cursor = crate::emoji_picker::insert(draft, &link, range, remaining, editing)?;
+	events.remove(at);
+	Some(cursor)
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
@@ -179,5 +216,48 @@ mod tests {
 		draft.shrink_to_fit();
 		assert!(apply(&mut draft, Style::Bold, selection(0, 1), 0, true).is_none());
 		assert_eq!(draft, "x");
+	}
+
+	#[test]
+	fn paste_link_masks_a_selection_only_for_a_lone_url() {
+		let paste = |text: &str| vec![egui::Event::Paste(text.into())];
+		let mut draft = "Đây là Google Link".to_owned();
+		let mut events = paste(" https://google.com\n");
+		let cursor = paste_link(&mut events, &mut draft, selection(14, 18), 100, true);
+		assert_eq!(cursor, Some(40));
+		assert_eq!(draft, "Đây là Google [Link](https://google.com)");
+		assert!(events.is_empty());
+
+		for (text, pasted, range) in [
+			("Đây là Google Link", "hello", selection(14, 18)),
+			(
+				"Đây là Google Link",
+				"https://a.com https://b.com",
+				selection(14, 18),
+			),
+			(
+				"Đây là Google Link",
+				"https://google.com",
+				selection(18, 18),
+			),
+			("two\nlines", "https://google.com", selection(0, 9)),
+			("see https://old.com", "https://new.com", selection(4, 19)),
+		] {
+			let mut draft = text.to_owned();
+			let mut events = paste(pasted);
+			assert_eq!(paste_link(&mut events, &mut draft, range, 100, true), None);
+			assert_eq!(draft, text);
+			assert_eq!(events.len(), 1);
+		}
+
+		let mut draft = "Link".to_owned();
+		draft.shrink_to_fit();
+		let mut events = paste("https://google.com");
+		assert_eq!(
+			paste_link(&mut events, &mut draft, selection(0, 4), 0, true),
+			None
+		);
+		assert_eq!(draft, "Link");
+		assert_eq!(events.len(), 1);
 	}
 }
