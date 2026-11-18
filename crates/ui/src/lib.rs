@@ -4589,6 +4589,24 @@ impl MessagingUi {
                                 state.status = "Formatting will not fit. Shorten this message or free draft space.";
                             }
                         }
+                        if keyboard_enabled
+                            && !self.ime_active
+                            && !ime_this_frame
+                            && ctx.memory(|m| m.has_focus(composer_id))
+                        {
+                            let mut edit_state =
+                                egui::text_edit::TextEditState::load(ctx, composer_id).unwrap_or_default();
+                            let range = edit_state.cursor.char_range();
+                            if let Some(cursor) = ctx.input_mut(|input| {
+                                formatting::paste_link(&mut input.events, draft, range, remaining, editing_here)
+                            }) {
+                                edit_state.cursor.set_char_range(Some(egui::text::CCursorRange::one(
+                                    egui::text::CCursor::new(cursor),
+                                )));
+                                edit_state.store(ctx, composer_id);
+                                mention_changed = true;
+                            }
+                        }
                         let rich_layout = &mut self.composer_layout;
                         if !self.ime_active
                             && !ime_this_frame
