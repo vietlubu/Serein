@@ -1,0 +1,42 @@
+name: macOS release
+on:
+  push:
+    branches: [main]
+concurrency:
+  group: macos-release
+  cancel-in-progress: false
+permissions:
+  contents: write
+jobs:
+  release:
+    runs-on: macos-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@1.99.1
+      - uses: Swatinem/rust-cache@v2.9.2
+        with:
+          cache-on-failure: true
+      # The in-app updater's Nightly channel accepts prerelease tags vX.Y.Z-nightly.A.B (semver order).
+      - name: Stamp nightly version
+        run: |
+          VERSION="1.0.0-nightly.$(TZ=Asia/Ho_Chi_Minh date +%Y%m%d).$GITHUB_RUN_NUMBER"
+          python3 .github/release/version.py "$VERSION"
+          echo "TAG=v$VERSION" >> "$GITHUB_ENV"
+      - name: Package app
+        run: cargo xtask package
+      # Asset names must match updater.rs `asset_name` and `SHA256SUMS.txt`.
+      # Ad-hoc signed: the first manual install needs `xattr -dr com.apple.quarantine Serein.app`.
+      - name: Archive app and checksums
+        run: |
+          mkdir release-assets
+          ditto -c -k --keepParent dist/Serein.app "release-assets/serein-$TAG-macOS-ARM64.zip"
+          (cd release-assets && shasum -a 256 "serein-$TAG-macOS-ARM64.zip" > SHA256SUMS.txt)
+      - name: Publish prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$TAG" release-assets/* -R "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --prerelease --title "Serein ${TAG#v}" --notes "$(git log -1 --format='- %s')"

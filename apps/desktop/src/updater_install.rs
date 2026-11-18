@@ -735,7 +735,10 @@ fn verify_mac(candidate: &Path, installed: &Path) -> Result<(), String> {
 	if !status.success() {
 		return Err("The update's macOS signature is invalid.".into());
 	}
-	fn identity(app: &Path) -> Result<(String, String), String> {
+	// This fork publishes ad-hoc signed builds ("TeamIdentifier=not set", not notarized), so
+	// Gatekeeper cannot vouch for them; trust rests on GitHub HTTPS plus SHA256SUMS. A missing
+	// Team ID must still match the installed app, so a Developer ID build is never replaced.
+	fn identity(app: &Path) -> Result<(Option<String>, String), String> {
 		let output = Command::new("/usr/bin/codesign")
 			.args(["-d", "--verbose=4"])
 			.arg(app)
@@ -745,31 +748,26 @@ fn verify_mac(candidate: &Path, installed: &Path) -> Result<(), String> {
 			return Err("Cannot inspect the application signing identity.".into());
 		}
 		let text = String::from_utf8_lossy(&output.stderr);
-		let team = text
+		let team = match text
 			.lines()
 			.find_map(|line| line.strip_prefix("TeamIdentifier="))
-			.filter(|team| team.len() == 10 && team.bytes().all(|b| b.is_ascii_alphanumeric()))
-			.ok_or("In-app installation requires a Developer ID signed release of Serein.")?;
+		{
+			Some("not set") => None,
+			Some(team) if team.len() == 10 && team.bytes().all(|b| b.is_ascii_alphanumeric()) => {
+				Some(team.to_owned())
+			}
+			_ => return Err("The update has an invalid signing team.".into()),
+		};
 		let identifier = text
 			.lines()
 			.find_map(|line| line.strip_prefix("Identifier="))
 			.ok_or("The update has no bundle signing identifier.")?;
-		Ok((team.into(), identifier.into()))
+		Ok((team, identifier.into()))
 	}
 	let old = identity(installed)?;
 	let new = identity(candidate)?;
 	if old != new || new.1 != "cz.viceverse.serein" {
 		return Err("The update was not signed by this Serein publisher.".into());
-	}
-	let status = Command::new("/usr/sbin/spctl")
-		.args(["--assess", "--type", "execute"])
-		.arg(candidate)
-		.stdout(Stdio::null())
-		.stderr(Stdio::null())
-		.status()
-		.map_err(|_| "Cannot assess the update with macOS Gatekeeper.".to_owned())?;
-	if !status.success() {
-		return Err("macOS Gatekeeper did not accept the update.".into());
 	}
 	Ok(())
 }
