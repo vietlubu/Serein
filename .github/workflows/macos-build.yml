@@ -1,0 +1,32 @@
+name: macOS build
+on:
+  push:
+  workflow_dispatch:
+concurrency:
+  group: macos-build-${{ github.ref }}
+  cancel-in-progress: true
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: macos-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@1.99.1
+      - uses: Swatinem/rust-cache@v2.9.2
+        with:
+          cache-on-failure: true
+      - name: Package app
+        run: cargo xtask package
+      # Unsigned (ad-hoc) build: Gatekeeper blocks it until `xattr -dr com.apple.quarantine Serein.app`.
+      - name: Archive app
+        run: ditto -c -k --keepParent dist/Serein.app "serein-macos-${GITHUB_SHA::7}.zip"
+      - uses: actions/upload-artifact@v7.0.1
+        with:
+          name: serein-macos-${{ github.sha }}
+          path: serein-macos-*.zip
+          if-no-files-found: error
+          retention-days: 14
