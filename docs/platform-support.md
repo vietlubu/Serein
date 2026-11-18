@@ -177,6 +177,11 @@ Wayland roundtrip or X11 query can stop idle detection without accumulating
 workers; the setting can still clear AFK. Wayland currently observes one seat,
 so activity on other seats in a multi-seat session is not included.
 
+Instant mobile push, also in Notifications and off by default, reports the session
+as away at all times, including voice calls, and needs no idle detection, so it
+works where the inactivity queries above are unavailable. Online shows as Idle
+while it is on.
+
 ## Window transparency and blur
 
 Enable Transparency & blur in Appearance and restart to create an alpha-capable

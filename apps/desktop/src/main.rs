@@ -6243,8 +6243,13 @@ impl eframe::App for Desktop {
 				.active
 				.as_ref()
 				.is_some_and(|call| call.phase != client_core::voice::Phase::Failed);
-			let timeout = (self.messaging.auto_idle && !in_call)
-				.then(|| Duration::from_secs(self.messaging.idle_timeout().into()));
+			// Instant mobile push reports afk at once, even in calls, so Discord pushes to the phone.
+			let timeout = if self.messaging.instant_mobile_push {
+				Some(Duration::ZERO)
+			} else {
+				(self.messaging.auto_idle && !in_call)
+					.then(|| Duration::from_secs(self.messaging.idle_timeout().into()))
+			};
 			connection
 				.auto_idle
 				.send_if_modified(|current| std::mem::replace(current, timeout) != timeout);

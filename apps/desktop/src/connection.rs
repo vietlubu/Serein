@@ -36,8 +36,8 @@ pub struct Connection {
 	pub share_activity: watch::Sender<bool>,
 	pub custom_rich_presence: watch::Sender<Option<extensions::CustomRichPresence>>,
 	pub own_presence: watch::Sender<model::OwnPresence>,
-	/// Idle-after timeout while Go idle when away applies (`None`: off or in a call); a poller
-	/// turns system inactivity into gateway afk.
+	/// Idle-after timeout while Go idle when away applies (`None`: off or in a call; `Some(ZERO)`:
+	/// Instant mobile push, afk at once without sampling); a poller turns it into gateway afk.
 	pub auto_idle: watch::Sender<Option<Duration>>,
 	/// The account's idle timeout in seconds (default when unset), sent once it is read at connect.
 	pub idle_timeout: watch::Receiver<Option<u32>>,
@@ -133,7 +133,10 @@ async fn run_auto_idle(
 			}
 		}
 		let timeout = *enabled.borrow();
-		let idle = if timeout.is_some() {
+		// Instant mobile push must not depend on idle sampling, which some platforms lack.
+		let idle = if timeout == Some(Duration::ZERO) {
+			Some(Duration::MAX)
+		} else if timeout.is_some() {
 			let pending =
 				query.get_or_insert_with(|| tokio::task::spawn_blocking(sample_idle.clone()));
 			// Turning the setting off still clears afk while a query is stuck.
@@ -2156,6 +2159,35 @@ mod tests {
 			"the old query must not restore AFK after re-enabling"
 		);
 		fresh.send(Some(Duration::ZERO)).unwrap();
+		drop(enabled);
+		tokio::time::timeout(IDLE_POLL, task)
+			.await
+			.unwrap()
+			.unwrap();
+	}
+
+	#[tokio::test]
+	async fn instant_mobile_push_reports_afk_without_sampling() {
+		let (enabled, settings) = watch::channel(Some(Duration::ZERO));
+		let (afk, mut observed) = watch::channel(false);
+		let sample = || -> Option<Duration> { panic!("instant mode must not sample") };
+		let task = tokio::spawn(run_auto_idle(
+			settings,
+			afk,
+			egui::Context::default(),
+			sample,
+		));
+		tokio::time::timeout(IDLE_POLL, observed.changed())
+			.await
+			.unwrap()
+			.unwrap();
+		assert!(*observed.borrow_and_update());
+		enabled.send(None).unwrap();
+		tokio::time::timeout(IDLE_POLL, observed.changed())
+			.await
+			.unwrap()
+			.unwrap();
+		assert!(!*observed.borrow());
 		drop(enabled);
 		tokio::time::timeout(IDLE_POLL, task)
 			.await

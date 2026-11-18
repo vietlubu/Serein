@@ -249,6 +249,13 @@ impl MessagingUi {
 					design::hint(ui, self.idle_timeout_status);
 				}
 			}
+			design::card_divider(ui);
+			design::switch(
+				ui,
+				"settings-instant-mobile-push",
+				Some("settings-instant-mobile-push-description"),
+				&mut self.instant_mobile_push,
+			);
 		});
 		self.settings.notifications.heading(ui, Tab::Sounds);
 		design::card(ui, |ui| {

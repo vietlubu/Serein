@@ -59,6 +59,7 @@ impl Settings {
 			hide_chat_server_tags: ui.hide_chat_server_tags,
 			preload_on_hover: ui.preload_on_hover,
 			auto_idle: ui.auto_idle,
+			instant_mobile_push: ui.instant_mobile_push,
 			hide_title_bar: ui.hide_title_bar,
 			message_requests_collapsed: ui.message_requests_collapsed,
 			hide_window_decorations: ui.hide_window_decorations,
@@ -117,6 +118,7 @@ impl Settings {
 		ui.hide_chat_server_tags = value.hide_chat_server_tags;
 		ui.preload_on_hover = value.preload_on_hover;
 		ui.auto_idle = value.auto_idle;
+		ui.instant_mobile_push = value.instant_mobile_push;
 		ui.hide_title_bar = value.hide_title_bar;
 		ui.message_requests_collapsed = value.message_requests_collapsed;
 		ui.hide_window_decorations = value.hide_window_decorations;
