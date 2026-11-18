@@ -545,8 +545,11 @@ fn notification(alert: &Alert) -> notify_rust::Notification {
 	notification
 		.appname("Serein")
 		.summary(&alert.title)
-		.body(&alert.body)
-		.timeout(5_000);
+		.body(&alert.body);
+	// macOS has no native TTL: the crate's timer would remove the notification and override
+	// the user's Banner/Alert style.
+	#[cfg(not(target_os = "macos"))]
+	notification.timeout(5_000);
 	#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 	notification.action("default", "Open channel");
 	if let Some(path) = &alert.image_path
