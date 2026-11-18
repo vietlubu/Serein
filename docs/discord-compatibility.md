@@ -1947,8 +1947,10 @@ chosen; the saved status is unchanged) so Discord can route push notifications t
 inactivity timeout is the account's `voice_and_video.afk_timeout` in settings-proto/1 (60 to 3600
 seconds, default 600). It is read with the status, and a change in Settings rewrites only that
 field, keeping the other voice settings like the status patches do. A locked screen counts as
-idle at once and voice calls suppress it. This mirrors the official client and is
-unofficial/unverified.
+idle at once and voice calls suppress it. This mirrors the official client. The off-by-default
+Instant mobile push setting instead sends `afk: true` for the whole session, including voice
+calls, without sampling inactivity, so Discord should not hold phone pushes back. Both are
+unofficial/unverified; phone delivery was not tested live.
 
 Offline tests cover native Windows IPC, malformed/oversized frames, handshake/update/clear,
 unsupported subscriptions, shutdown, rich Gateway fields, rate spacing and reconnect.
