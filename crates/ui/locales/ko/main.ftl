@@ -4724,6 +4724,8 @@ settings-auto-idle = 자리를 비우면 자리 비움으로 표시
 settings-auto-idle-description = 아래 시간 동안 키보드나 마우스 입력이 없거나 컴퓨터를 잠그면 자리 비움으로 표시합니다. 음성 통화 중에는 적용하지 않습니다.
 settings-idle-after = 자리 비움 전환 시간
 settings-idle-after-minutes = { $count }분
+settings-instant-mobile-push = 모바일 푸시 즉시 받기
+settings-instant-mobile-push-description = Discord는 이 컴퓨터가 활성 상태로 보이면 휴대폰 알림을 보류합니다. 음성 통화 중을 포함해 항상 이 세션을 자리 비움으로 보고해 휴대폰에 즉시 알림이 가도록 합니다. 다른 사람에게는 자리 비움으로 표시됩니다.
 
 profiles-board = 보드
 profiles-board-unavailable = 이 프로필의 보드를 사용할 수 없습니다.

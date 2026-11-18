@@ -4785,6 +4785,8 @@ settings-idle-after-minutes =
         [one] { $count } minute
        *[other] { $count } minutes
     }
+settings-instant-mobile-push = Instant mobile push
+settings-instant-mobile-push-description = Discord holds phone notifications while this computer looks active. Report this session as away at all times, including during voice calls, so your phone is notified immediately. You appear Idle to others.
 
 profiles-board = Board
 profiles-board-unavailable = This profile’s board is unavailable.

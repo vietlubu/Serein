@@ -577,6 +577,8 @@ pub struct MessagingUi {
 	pub notifications_enabled: bool,
 	/// Show as Idle after the account's idle timeout of system inactivity, or on lock.
 	pub auto_idle: bool,
+	/// Report afk at all times so phone pushes are not held back; shows Online as Idle.
+	pub instant_mobile_push: bool,
 	/// Idle timeout in seconds from the account, not saved locally; 0 until read (see
 	/// `idle_timeout`).
 	pub idle_timeout_secs: u32,

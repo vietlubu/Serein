@@ -57,6 +57,8 @@ pub struct AppPreferences {
 	pub preload_on_hover: bool,
 	/// Show as Idle after 10 minutes of system inactivity; older preferences enable it.
 	pub auto_idle: bool,
+	/// Report afk at once so Discord pushes to the phone immediately; older preferences keep it off.
+	pub instant_mobile_push: bool,
 	/// Hide the in-app title strip. macOS and Windows then show the system title bar.
 	pub hide_title_bar: bool,
 	/// Keep the home list's message requests section collapsed after a restart.
@@ -127,6 +129,7 @@ impl Default for AppPreferences {
 			hide_ignored_messages: false,
 			preload_on_hover: false,
 			auto_idle: true,
+			instant_mobile_push: false,
 			hide_title_bar: false,
 			message_requests_collapsed: false,
 			hide_window_decorations: false,
