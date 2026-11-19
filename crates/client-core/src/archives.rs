@@ -221,8 +221,9 @@ impl State {
 	/// The thread a message started, when the session already knows it.
 	///
 	/// Messages carrying the service `HAS_THREAD` flag share their id with the thread. A
-	/// "started a thread" system row (type 18) only names the thread in `content`, so it is
-	/// matched by name against this channel's known threads; renamed threads are not inferred.
+	/// "started a thread" system row (type 18) names its thread through its reference when the
+	/// service sent one; otherwise it only names the thread in `content`, so it is matched by
+	/// name against this channel's known threads, and renamed threads are not inferred.
 	pub fn thread_of(&self, message: &model::Message) -> Option<&Channel> {
 		let is_thread =
 			|c: &&Channel| matches!(c.kind, 10..=12) && c.parent_id == Some(message.channel);
@@ -231,6 +232,11 @@ impl State {
 			&& is_thread(&thread)
 		{
 			return Some(thread);
+		}
+		if message.kind == 18
+			&& let Some(id) = message.thread
+		{
+			return self.channels.iter().find(|c| c.id == id).filter(is_thread);
 		}
 		if message.kind == 18 {
 			let name = message.content.trim();
@@ -250,17 +256,23 @@ impl State {
 
 	/// The thread `message` started that this session has not loaded.
 	///
-	/// The service's [`model::HAS_THREAD`] flag is the only admitted proof of the relation: a
-	/// thread channel shares its starter's ID. The timeline offers to open such a thread with
-	/// one bounded channel read; nothing here fetches or guesses a parent.
+	/// The service's [`model::HAS_THREAD`] flag (a thread channel shares its starter's ID) or a
+	/// type-18 row's thread reference are the admitted proofs of the relation. The timeline
+	/// offers to open such a thread with one bounded channel read; nothing here fetches or
+	/// guesses a parent.
 	pub fn unloaded_thread(&self, message: &model::Message) -> Option<Id> {
 		let parent = self.channel(message.channel)?;
-		(message.flags & model::HAS_THREAD != 0
-			&& message.kind != 18
-			&& parent.guild.is_some()
+		let thread = if message.kind == 18 {
+			message.thread?
+		} else if message.flags & model::HAS_THREAD != 0 {
+			message.id
+		} else {
+			return None;
+		};
+		(parent.guild.is_some()
 			&& matches!(parent.kind, 0 | 5 | 10..=12 | 15 | 16)
-			&& self.channel(message.id).is_none())
-		.then_some(message.id)
+			&& self.channel(thread).is_none())
+		.then_some(thread)
 	}
 
 	fn archive_thread_kind(&self, parent: Id, kind: Kind) -> Option<u8> {
@@ -331,6 +343,7 @@ mod tests {
 			nonce: None,
 			reply_to: None,
 			kind: 0,
+			thread: None,
 			reply_deleted: false,
 			interaction: None,
 			forwarded: false,
@@ -856,6 +869,19 @@ mod tests {
 		assert!(
 			state.thread_of(&renamed).is_none(),
 			"A renamed thread is not inferred; only an exact name match resolves"
+		);
+		renamed.thread = Some(Id(31));
+		assert_eq!(
+			state.thread_of(&renamed).map(|c| c.id),
+			Some(Id(31)),
+			"A type-18 row's thread reference resolves a renamed thread"
+		);
+		renamed.thread = Some(Id(41));
+		assert!(state.thread_of(&renamed).is_none());
+		assert_eq!(
+			state.unloaded_thread(&renamed),
+			Some(Id(41)),
+			"A referenced thread this session lacks is offered as one bounded read"
 		);
 
 		let mut other_channel = message(997, Id(20));

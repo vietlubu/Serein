@@ -116,6 +116,8 @@ pub struct TimelineView {
 	pub(super) suppress_embeds: Option<(Id, Id, bool)>,
 	/// Requested new thread: parent channel and the message that starts it.
 	pub(super) thread_request: Option<(Id, Id)>,
+	/// A thread to peek (thread, the row it was opened from).
+	pub(super) thread_open: Option<(Id, Id)>,
 	/// Starter message of the first visible thread card whose latest message is unknown.
 	pub(super) thread_preview_request: Option<Id>,
 	/// Channel whose Threads dialog a system row asked to open.
@@ -413,6 +415,7 @@ fn layout_key(message: &Message) -> u64 {
 	message.edited.hash(&mut key);
 	(message.flags & (1 << 12) != 0).hash(&mut key);
 	message.reply_to.hash(&mut key);
+	message.thread.hash(&mut key);
 	if let Some(interaction) = &message.interaction {
 		interaction.user.id.hash(&mut key);
 		interaction.user.name.hash(&mut key);
@@ -2265,6 +2268,7 @@ fn unread_banner(
 fn show_system(
 	ui: &mut egui::Ui,
 	system: &model::SystemMessage,
+	message: &model::Message,
 	time: time::OffsetDateTime,
 	state: &State,
 	profile: &mut crate::profiles::ProfileSession,
@@ -2272,7 +2276,7 @@ fn show_system(
 	surface: &mut crate::select::Surface,
 	// A "started a thread" row: the known thread, its channel, and where clicks go.
 	thread: Option<(Option<Id>, Id)>,
-	targets: (&mut Option<Id>, &mut Option<Id>),
+	targets: (&mut Option<(Id, Id)>, &mut Option<Id>),
 ) {
 	let (open_thread, open_all) = targets;
 	{
@@ -2289,8 +2293,11 @@ fn show_system(
 					surface.run(ui, &response, pos, galley, Vec::new());
 					continue;
 				}
-				let text = crate::design::medium(ui, &segment.text, 15.0).color(colors.text_strong);
+				let medium = |ui: &egui::Ui, text: &str| {
+					crate::design::medium(ui, text, 15.0).color(colors.text_strong)
+				};
 				let Some(user) = &segment.user else {
+					let text = medium(ui, &segment.text);
 					// The thread name in a "started a thread" row opens the thread itself.
 					if let Some((Some(id), _)) = thread {
 						let response = ui
@@ -2302,7 +2309,7 @@ fn show_system(
 							));
 						surface.keep(&response);
 						if response.clicked() {
-							*open_thread = Some(id);
+							*open_thread = Some((id, message.id));
 						}
 						continue;
 					}
@@ -2313,6 +2320,13 @@ fn show_system(
 					surface.run(ui, &response, pos, galley, Vec::new());
 					continue;
 				};
+				// The author reads as in message headers: server nickname before account name.
+				let name = if user.id == message.author.id {
+					state.message_author_name(message)
+				} else {
+					segment.text.as_str()
+				};
+				let text = medium(ui, name);
 				let response = ui
 					.add(egui::Label::new(text).sense(egui::Sense::click()))
 					.on_hover_cursor(egui::CursorIcon::PointingHand);
@@ -3762,6 +3776,9 @@ impl TimelineView {
 										egui::vec2(40.0, MESSAGE_LINE),
 										egui::Sense::hover(),
 									);
+									if message.kind == 18 {
+										thread_gutter = Some(gutter);
+									}
 									let (icon, tint) = system_icon(message.kind, &colors);
 									crate::icons::paint(
 										ui.painter(),
@@ -4026,16 +4043,14 @@ impl TimelineView {
 										show_system(
 											ui,
 											system,
+											message,
 											timestamp(id),
 											state,
 											profile,
 											&mut self.user_action,
 											&mut surface,
 											thread,
-											(
-												&mut self.channel_reference,
-												&mut self.threads_request,
-											),
+											(&mut self.thread_open, &mut self.threads_request),
 										);
 									}
 									// Retained wire flags also cover cached history; notification targeting stays session-only.
@@ -4485,8 +4500,8 @@ impl TimelineView {
 										);
 										ui.painter().rect_filled(rail, 2.0, colors.selected);
 									}
-									// A "started a thread" row already links the thread inline.
-									if system.is_none()
+									// Thread starters and "started a thread" rows both carry the thread card.
+									if (system.is_none() || message.kind == 18)
 										&& let Some(thread) = state
 											.thread_of(message)
 											.map(|thread| thread.id)
@@ -4563,7 +4578,7 @@ impl TimelineView {
 										);
 										surface.keep(&card);
 										if card.clicked() {
-											self.channel_reference = Some(thread);
+											self.thread_open = Some((thread, message.id));
 										}
 										thread_card_rect = Some(card.rect);
 										if visible && state.thread_preview_needs_read(thread) {
@@ -4881,21 +4896,23 @@ impl TimelineView {
 							// Holding Shift exposes direct utility actions and quick delete; More stays on normal hover.
 							let shift = ui.input(|input| input.modifiers.shift);
 							let can_pin = state.can_pin(message.channel, id);
+							let can_thread = state.can_create_thread(message.channel)
+								&& state.thread_of(message).is_none();
 							let can_delete = state.can_delete(message.channel, id);
 							let link = state
 								.channel(message.channel)
 								.and_then(|channel| discord_url(channel, Some(id)));
 							let translate = translatable(message);
-							let buttons = if shift {
-								4 + usize::from(link.is_some())
-									+ usize::from(can_mark_unread)
-									+ usize::from(can_pin) + usize::from(translate)
-									+ usize::from(own) + usize::from(can_delete)
-							} else {
-								(if react { 4 } else { 1 })
-									+ 2 + usize::from(translate)
-									+ usize::from(own)
-							};
+							let buttons =
+								if shift {
+									4 + usize::from(link.is_some())
+										+ usize::from(can_mark_unread) + usize::from(can_pin)
+										+ usize::from(can_thread) + usize::from(translate)
+										+ usize::from(own) + usize::from(can_delete)
+								} else {
+									(if react { 4 } else { 1 })
+										+ 2 + usize::from(translate) + usize::from(own)
+								};
 							let width = buttons as f32 * 30.0;
 							let toolbar_rect = egui::Rect::from_min_size(
 								egui::pos2(
@@ -4966,6 +4983,16 @@ impl TimelineView {
 									.clicked()
 								{
 									self.pin_request = Some((message.channel, id, !pinned));
+								}
+								if can_thread
+									&& action_button(
+										&mut toolbar,
+										crate::icons::Icon::Thread,
+										"timeline-message-actions-create-thread",
+									)
+									.clicked()
+								{
+									self.thread_request = Some((message.channel, id));
 								}
 								if toolbar
 									.add_enabled_ui(
@@ -5172,11 +5199,7 @@ impl TimelineView {
 									state.is_pinned(message.channel, id),
 									&mut self.pin_request,
 								),
-								(
-									state.can_create_thread(message.channel)
-										&& state.thread_of(message).is_none(),
-									&mut self.thread_request,
-								),
+								(can_thread, &mut self.thread_request),
 								(state.can_forward(id), &mut self.forward_request),
 								message
 									.reactions
@@ -6912,6 +6935,7 @@ mod tests {
 			nonce: None,
 			reply_to: None,
 			kind: 0,
+			thread: None,
 			reply_deleted: false,
 			interaction: None,
 			forwarded: false,
@@ -8278,8 +8302,8 @@ mod tests {
 			shift,
 		);
 		let toolbar = view.toolbar.unwrap().1;
-		// This fixture grants link/edit/forward/delete, but not optional pin/mark-unread actions.
-		assert_eq!(toolbar.width(), 240.0);
+		// This fixture grants link/edit/forward/thread/delete, but not optional pin/mark-unread actions.
+		assert_eq!(toolbar.width(), 270.0);
 		let mut copied = vec![];
 		for events in click(toolbar.left_center() + egui::vec2(14.0, 0.0), shift) {
 			copied.extend(render(&mut view, &mut state, events, shift).1);
@@ -10482,6 +10506,7 @@ mod tests {
 			nonce: None,
 			reply_to: None,
 			kind: 0,
+			thread: None,
 			reply_deleted: false,
 			interaction: None,
 			forwarded: false,
@@ -10657,6 +10682,7 @@ mod tests {
 			nonce: None,
 			reply_to: None,
 			kind: 0,
+			thread: None,
 			reply_deleted: false,
 			interaction: None,
 			forwarded: false,
@@ -10760,6 +10786,7 @@ mod tests {
 			nonce: None,
 			reply_to: None,
 			kind: 0,
+			thread: None,
 			reply_deleted: false,
 			interaction: None,
 			forwarded: false,

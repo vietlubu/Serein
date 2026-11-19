@@ -2029,7 +2029,7 @@ post-menu-context-follow-this-post-to-change-its-notifications = Follow this pos
 # Context: context
 post-menu-context-follow-this-thread-to-change-its-notifications = Follow this thread to change its notifications.
 # Context: context
-post-menu-context-follow-thread = Follow Thread
+post-menu-context-follow-thread = Join Thread
 # Context: context
 post-menu-context-loading = Loading
 # Context: context
@@ -2045,6 +2045,8 @@ post-menu-context-mute-thread = Mute Thread
 # Context: context
 post-menu-context-notification-settings = Notification Settings
 # Context: context
+post-menu-context-open-in-full-view = Open in Full View
+# Context: context
 post-menu-context-open-post = Open Post
 # Context: context
 post-menu-context-open-thread = Open Thread
@@ -2053,15 +2055,19 @@ post-menu-context-pin-post = Pin Post
 # Context: context
 post-menu-context-pin-thread = Pin Thread
 # Context: context
+post-menu-context-pins = Pins
+# Context: context
 post-menu-context-remove-from-favorites = Remove From Favorites
 # Context: context
 post-menu-context-retry = Retry
+# Context: context
+post-menu-context-search = Search
 # Context: context
 post-menu-context-settings = settings
 # Context: context
 post-menu-context-unfollow-post = Unfollow Post
 # Context: context
-post-menu-context-unfollow-thread = Unfollow Thread
+post-menu-context-unfollow-thread = Leave Thread
 # Context: context
 post-menu-context-unlock-post = Unlock Post
 # Context: context
@@ -3979,6 +3985,24 @@ thread-create-show-everyone-who-can-see-this-channel-can-see-the-thread = Everyo
 thread-create-show-the-selected-message-starts-the-thread-everyone-who-can-see = The selected message starts the thread. Everyone who can see this channel can see the thread.
 # Context: show
 thread-create-show-thread-name = Thread name
+
+## crates/ui/src/thread_pane.rs
+# Context: show
+thread-pane-close = Close
+# Context: show
+thread-pane-empty = There are no messages in this thread yet.
+# Context: show
+thread-pane-failed = This thread couldn't be loaded.
+# Context: show
+thread-pane-loading = Loading thread…
+# Context: content
+thread-pane-media = Attachments: { $count }
+# Context: show
+thread-pane-message-hint = Message “{ $thread }”
+# Context: show
+thread-pane-not-sent = Not sent. Open the thread to retry.
+# Context: show
+thread-pane-started-by = Started by { $name }
 
 ## crates/ui/src/timeline.rs
 # Context: channel_welcome

@@ -1151,6 +1151,10 @@ impl MessageDto {
 			author.kind = model::AccountKind::App;
 		}
 		let has_poll = self.poll.is_some();
+		let thread = (self.kind == 18)
+			.then(|| self.message_reference.as_ref().and_then(|r| r.channel_id))
+			.flatten()
+			.filter(|id| id.0 != 0 && *id != self.channel_id);
 		Message {
 			poll: self.poll.and_then(|poll| poll.0),
 			flags: self.flags,
@@ -1198,6 +1202,7 @@ impl MessageDto {
 			}),
 			kind: self.kind,
 			reply_to,
+			thread,
 			reply_deleted,
 			forwarded,
 			forward_origin,
@@ -1368,6 +1373,19 @@ pub struct ErrorBody {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	#[test]
+	fn thread_created_row_names_its_thread() {
+		let thread = |kind: u8, reference: &str| {
+			let wire = serde_json::json!({"id":"100","type":kind,"channel_id":"2","author":{"id":"3","username":"Synthetic"},"content":"Synthetic thread","message_reference":{"channel_id":reference,"guild_id":"5"}});
+			decode::<MessageDto>(&serde_json::to_vec(&wire).unwrap())
+				.unwrap()
+				.into_model()
+				.thread
+		};
+		assert_eq!(thread(18, "77"), Some(Id(77)));
+		assert_eq!(thread(0, "77"), None, "only a type-18 row names a thread");
+		assert_eq!(thread(18, "2"), None, "a row never names its own channel");
+	}
 	#[test]
 	fn webhook_authors_require_explicit_message_metadata() {
 		{

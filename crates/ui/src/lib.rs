@@ -53,6 +53,7 @@ mod start_screen;
 mod theme_editor;
 pub use start_screen::{DecodedStartScreen, StartScreenView};
 mod thread_create;
+mod thread_pane;
 pub use extensions_ui::{ExtensionContext, ExtensionEntry, ExtensionRequest, ExtensionUi};
 pub use interface_ui::PluginInterface;
 pub mod emoji;
@@ -348,6 +349,7 @@ pub struct MessagingUi {
 	archives: archives::ArchivesUi,
 	archive_parent: Option<Id>,
 	thread_create: thread_create::ThreadCreateUi,
+	thread_pane: thread_pane::ThreadPaneUi,
 	new_message: new_message::NewMessageUi,
 	forum: forum::ForumUi,
 	scroll: scroll::Session,
@@ -3244,6 +3246,21 @@ impl MessagingUi {
 						self.new_message.open_for_group(state, c.id);
 					}
 				}
+				if let Some(c) = channel
+					.as_ref()
+					.filter(|c| matches!(c.kind, 10..=12) && state.is_thread_channel(c.id))
+				{
+					self.channel_menu.thread_dropdown(
+						ui,
+						state,
+						c,
+						shortcuts::ShortcutView::new(
+							&self.channel_preferences,
+							shortcuts_available,
+						),
+						false,
+					);
+				}
 				if state.selected.is_some() && !selected_voice {
 					if self.search.open && !self.search.pins() {
 						ui.allocate_ui_with_layout(
@@ -5885,8 +5902,11 @@ impl MessagingUi {
 		self.search.extension_actions = self.extensions.message_actions();
 		let search_open =
 			self.search.results_visible(state) && state.selected.is_some() && !selected_voice;
+		let thread_pane_open =
+			wide_members && !search_open && !selected_voice && state.thread_pane().is_some();
 		let show_members = !selected_voice
 			&& !search_open
+			&& !thread_pane_open
 			&& state.selected.is_some()
 			&& if wide_members {
 				*self.members_preference(state)
@@ -5933,6 +5953,28 @@ impl MessagingUi {
 							video: &mut self.timeline.video,
 						},
 						&mut self.profile,
+					);
+				});
+		}
+		if thread_pane_open {
+			let shortcuts_available = self.shortcuts_available(state);
+			egui::Panel::right("thread-pane")
+				.resizable(false)
+				.show_separator_line(!design::has_window_background(ui))
+				.exact_size((ui.available_width() * 0.4).clamp(320.0, 520.0))
+				.frame(egui::Frame::new().fill(design::window_palette(ui).chat))
+				.show(ui, |ui| {
+					self.thread_pane.show(
+						ui,
+						state,
+						&mut commands,
+						&mut self.avatars,
+						&mut self.profile,
+						&mut self.channel_menu,
+						shortcuts::ShortcutView::new(
+							&self.channel_preferences,
+							shortcuts_available,
+						),
 					);
 				});
 		}
@@ -6622,6 +6664,48 @@ impl MessagingUi {
 			&& let Some(command) = state.request_channel_reference(guild, id)
 		{
 			commands.push(command);
+		}
+		if let Some((thread, origin)) = self.timeline.thread_open.take() {
+			// Discord peeks a thread beside its parent; narrow windows and unloaded threads open it in full.
+			match (wide_members && state.channel(thread).is_some())
+				.then(|| state.open_thread_pane(thread))
+				.flatten()
+			{
+				Some(command) => {
+					commands.push(command);
+					self.thread_pane.open(thread, origin);
+				}
+				None => self.timeline.channel_reference = Some(thread),
+			}
+		}
+		if let Some(thread) = self.thread_pane.full_view.take().or(self
+			.channel_menu
+			.posts
+			.full_view_requested
+			.take()) && let Some(command) = state.select(thread)
+		{
+			commands.push(command);
+		}
+		if let Some((thread, pins)) = self.channel_menu.posts.search_requested.take() {
+			if let Some(command) = state.select(thread) {
+				commands.push(command);
+			}
+			if state.selected == Some(thread) {
+				if pins {
+					if let Some(command) = state.request_pins() {
+						self.search.open_extension(thread, true, None);
+						commands.push(command);
+					}
+				} else {
+					self.search.focus_conversation(thread, state);
+				}
+			}
+		}
+		if let Some(link) = self.thread_pane.opening.take() {
+			self.timeline.opening = Some(link);
+		}
+		if let Some(id) = self.thread_pane.channel_reference.take() {
+			self.timeline.channel_reference = Some(id);
 		}
 		if let Some(id) = self.timeline.channel_reference.take() {
 			state.clear_channel_action_result(id);
@@ -7842,6 +7926,7 @@ mod composer_tests {
 					nonce: None,
 					reply_to: None,
 					kind: 0,
+					thread: None,
 					reply_deleted: false,
 					interaction: None,
 					forwarded: false,

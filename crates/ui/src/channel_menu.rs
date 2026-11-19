@@ -50,7 +50,7 @@ struct Dialog {
 
 #[derive(Default)]
 pub(super) struct ChannelMenu {
-	posts: crate::post_menu::PostMenu,
+	pub(super) posts: crate::post_menu::PostMenu,
 	pub invite_requested: Option<(Id, Id)>,
 	/// Browse Channels was chosen for this server.
 	pub browse_requested: Option<Id>,
@@ -100,6 +100,22 @@ impl ChannelMenu {
 	pub fn report_capacity(&mut self, generation: u64) {
 		self.preference_error = true;
 		self.generation = generation;
+	}
+
+	/// The `…` menu of a thread header; the same actions as the thread's context menu.
+	pub fn thread_dropdown(
+		&mut self,
+		ui: &mut egui::Ui,
+		state: &State,
+		channel: &Channel,
+		view: ShortcutView<'_>,
+		pane: bool,
+	) {
+		self.posts.dropdown(ui, state, channel, view, pane);
+		if let Some(intent) = self.posts.shortcut_requested.take() {
+			self.shortcut_requested = Some(intent);
+		}
+		self.generation = state.generation;
 	}
 
 	/// Shows a channel row's context menu, including plugin channel actions, and records the

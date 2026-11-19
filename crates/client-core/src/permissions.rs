@@ -748,8 +748,11 @@ impl State {
 	/// An explicit REST send can proceed during a transient Gateway outage. Discord
 	/// remains authoritative over the last known channel permissions.
 	pub fn can_send(&self, channel: Id) -> bool {
+		self.selected == Some(channel) && self.can_send_to(channel)
+	}
+	/// [`Self::can_send`] for a channel that need not be selected, such as the thread peek.
+	pub fn can_send_to(&self, channel: Id) -> bool {
 		self.auth == AuthState::Authenticated
-			&& self.selected == Some(channel)
 			&& self.freshness != Freshness::Unavailable
 			&& self.can_compose(channel)
 	}

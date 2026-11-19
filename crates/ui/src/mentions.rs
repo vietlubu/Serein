@@ -2368,6 +2368,7 @@ pub fn debug_role_mentions_check(state: &mut State) {
 			nonce: None,
 			reply_to: None,
 			kind: 0,
+			thread: None,
 			reply_deleted: false,
 			interaction: None,
 			forwarded: false,

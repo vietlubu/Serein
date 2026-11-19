@@ -1581,6 +1581,7 @@ fn demo_fetch(command: &Command) -> bool {
 		| Command::Search { .. }
 		| Command::ThreadStarter { .. }
 		| Command::ThreadPreview { .. }
+		| Command::ThreadPane { .. }
 		| Command::Gifs { .. }
 		| Command::Profile { .. }
 		| Command::StreamPreview { .. }
@@ -4365,6 +4366,15 @@ impl Desktop {
 							channel,
 							last: Some(message),
 						}),
+					}
+				}
+				Command::ThreadPane { thread, request } => {
+					let mut reply = test_support::message(thread.0 + 3, thread);
+					reply.content = "A synthetic reply shown in the thread peek.".into();
+					Event::ThreadPane {
+						thread,
+						request,
+						result: Ok(vec![reply]),
 					}
 				}
 				Command::CreatePost {

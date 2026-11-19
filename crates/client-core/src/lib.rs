@@ -45,6 +45,7 @@ pub mod server_integrations;
 pub mod server_roles;
 pub mod server_settings;
 pub mod slowmode;
+pub mod thread_pane;
 pub mod thread_previews;
 mod thread_starter;
 mod threads;
@@ -213,6 +214,11 @@ pub enum Command {
 		guild: Id,
 		thread: Id,
 		needs_channel: bool,
+		request: u64,
+	},
+	/// The newest messages of the peeked thread.
+	ThreadPane {
+		thread: Id,
 		request: u64,
 	},
 	Gifs {
@@ -570,6 +576,11 @@ pub enum Event {
 		request: u64,
 		result: Result<thread_previews::Loaded, auth::Failure>,
 	},
+	ThreadPane {
+		thread: Id,
+		request: u64,
+		result: Result<Vec<Message>, auth::Failure>,
+	},
 	ForumSummaries {
 		request: u64,
 		results: Vec<(Id, Result<model::forum::Summary, auth::Failure>)>,
@@ -810,6 +821,7 @@ pub struct State {
 	pub forum_visit: Option<forum::Visit>,
 	pub archived_thread: Option<Id>,
 	pub thread_starter: thread_starter::Starter,
+	pub thread_pane: thread_pane::Pane,
 	pub thread_previews: thread_previews::Previews,
 	pub search: Option<search::SearchView>,
 	pub search_request: u64,
@@ -1058,6 +1070,7 @@ impl Default for State {
 			forum_visit: None,
 			archived_thread: None,
 			thread_starter: Default::default(),
+			thread_pane: Default::default(),
 			thread_previews: Default::default(),
 			search: None,
 			search_request: 0,
@@ -1423,6 +1436,7 @@ impl State {
 		self.selected = Some(channel);
 		self.clear_search();
 		self.reset_thread_starter();
+		self.close_thread_pane();
 		self.search_target = None;
 		self.restore_scroll = false;
 		self.reactions.reset();
@@ -1972,7 +1986,11 @@ impl State {
 	}
 	/// Queue explicit text without consuming the composer draft or reply target.
 	pub fn prepare_text_send(&mut self, content: &str) -> Option<Command> {
-		self.prepare_message_content(&[], None, true, Some(content), None)
+		self.prepare_message_content(self.selected?, &[], None, true, Some(content), None)
+	}
+	/// Queue plain text to `channel` (the thread peek) without touching the selected composer's draft or reply.
+	pub fn prepare_text_send_to(&mut self, channel: Id, content: &str) -> Option<Command> {
+		self.prepare_message_content(channel, &[], None, true, Some(content), None)
 	}
 	/// Queue an explicit reply without consuming the composer draft or its reply target.
 	pub fn prepare_reply_send(
@@ -1989,7 +2007,7 @@ impl State {
 		}
 		let mut reply = Reply::to(target);
 		reply.mention = mention;
-		self.prepare_message_content(&[], None, true, Some(content), Some(reply))
+		self.prepare_message_content(channel, &[], None, true, Some(content), Some(reply))
 	}
 	pub fn prepare_send_with_attachment(&mut self, filename: Option<&str>) -> Option<Command> {
 		self.prepare_send_with_attachments(filename.as_slice())
@@ -2008,18 +2026,25 @@ impl State {
 		sticker: Option<&Sticker>,
 		preserve_draft: bool,
 	) -> Option<Command> {
-		self.prepare_message_content(filenames, sticker, preserve_draft, None, None)
+		self.prepare_message_content(
+			self.selected?,
+			filenames,
+			sticker,
+			preserve_draft,
+			None,
+			None,
+		)
 	}
 	fn prepare_message_content(
 		&mut self,
+		channel: Id,
 		filenames: &[&str],
 		sticker: Option<&Sticker>,
 		preserve_draft: bool,
 		explicit_content: Option<&str>,
 		explicit_reply: Option<Reply>,
 	) -> Option<Command> {
-		let channel = self.selected?;
-		if !self.can_send(channel) || (!filenames.is_empty() && !self.can_attach(channel)) {
+		if !self.can_send_to(channel) || (!filenames.is_empty() && !self.can_attach(channel)) {
 			self.status = "Sending is unavailable with the current connection or permissions";
 			return None;
 		}
@@ -2395,6 +2420,10 @@ impl State {
 		} = command
 		{
 			self.apply_thread_preview(thread, request, Err(auth::Failure::Capacity));
+			return;
+		}
+		if let Command::ThreadPane { thread, request } = command {
+			self.apply_thread_pane(thread, request, Err(auth::Failure::Capacity));
 			return;
 		}
 		if let Command::ForumSummaries { channels, request } = command {
@@ -3042,6 +3071,14 @@ impl State {
 				result,
 			} => {
 				self.apply_thread_preview(thread, request, result);
+				Ok(())
+			}
+			Event::ThreadPane {
+				thread,
+				request,
+				result,
+			} => {
+				self.apply_thread_pane(thread, request, result);
 				Ok(())
 			}
 			Event::ForumSummaries { request, results } => {
@@ -3912,6 +3949,7 @@ impl State {
 						.and_then(|old| old.reactions.clone());
 				}
 				self.confirm(&m);
+				self.observe_thread_pane_message(&m);
 				if deletion.is_err() {
 					deletion
 				} else if self.selected == Some(m.channel)
@@ -3956,6 +3994,7 @@ impl State {
 				}
 			}
 			Event::Delete { channel, id } => {
+				self.forget_thread_pane_messages(channel, &[id]);
 				self.parked_replies.forget_targets(channel, &[id]);
 				self.read_state.activity.delete(channel, id);
 				self.forget_pending_replies(channel, &[id]);
@@ -3999,6 +4038,7 @@ impl State {
 				Ok(())
 			}
 			Event::DeleteBulk { channel, ids } => {
+				self.forget_thread_pane_messages(channel, &ids);
 				self.parked_replies.forget_targets(channel, &ids);
 				self.thread_previews.forget(channel, &ids);
 				if ids.len() <= 100 {
@@ -4045,6 +4085,7 @@ impl State {
 									&& known.nonce.as_deref() == Some(nonce.as_str())
 							}));
 						if correlated {
+							self.observe_thread_pane_message(&m);
 							if let Some(sticker) = self
 								.pending
 								.iter()
@@ -4640,6 +4681,10 @@ impl Event {
 				Self::ThreadPreview { result, .. } => {
 					result.as_ref().map_or(0, thread_previews::Loaded::bytes)
 				}
+				Self::ThreadPane { result, .. } => result.as_ref().map_or(0, |messages| {
+					messages.capacity() * size_of::<Message>()
+						+ messages.iter().map(Message::bytes).sum::<usize>()
+				}),
 				Self::ForumSummaries { results, .. } => {
 					results.capacity()
 						* size_of::<(Id, Result<model::forum::Summary, auth::Failure>)>()
@@ -6366,6 +6411,7 @@ mod tests {
 			nonce: None,
 			reply_to: None,
 			kind: 0,
+			thread: None,
 			reply_deleted: false,
 			interaction: None,
 			forwarded: false,
