@@ -79,6 +79,8 @@ pub struct TimelineView {
 	present_scroll: Option<(f32, f32)>,
 	/// Where the jump-to-present control was painted this frame, for hit tests in tests.
 	pub(super) present_control: Option<egui::Rect>,
+	/// Jump to Present was pressed; takes the control's click path even when it is hidden.
+	pub(super) present_request: bool,
 	highlighted: Option<(Id, f64)>,
 	target_browsing: bool,
 	hold_read_ack: bool,
@@ -5618,6 +5620,7 @@ impl TimelineView {
 					state.timeline.iter().filter(|m| m.id > seen).count()
 				})
 		};
+		let mut present = std::mem::take(&mut self.present_request);
 		self.present_control = None;
 		if (!self.following && distance_from_bottom > PRESENT_CONTROL_SCREENS * area.height())
 			|| (self.target_browsing && !(at_bottom && unread))
@@ -5633,21 +5636,22 @@ impl TimelineView {
 					&[],
 				)
 			});
-			let (rect, present) = present_control(ui, area, unread, label.as_deref());
+			let (rect, clicked) = present_control(ui, area, unread, label.as_deref());
 			self.present_control = Some(rect);
-			if present {
-				if browsing_history {
-					self.latest = true;
-				}
-				if distance_from_bottom > 0.5 && !browsing_history && !self.instant_scrolling {
-					// Glide back so the reader keeps their place in the conversation.
-					self.target_browsing = false;
-					self.present_scroll = Some((output.state.clamped_offset().y, 0.0));
-				} else {
-					self.follow_latest(state);
-				}
-				ui.ctx().request_repaint();
+			present |= clicked;
+		}
+		if present {
+			if browsing_history {
+				self.latest = true;
 			}
+			if distance_from_bottom > 0.5 && !browsing_history && !self.instant_scrolling {
+				// Glide back so the reader keeps their place in the conversation.
+				self.target_browsing = false;
+				self.present_scroll = Some((output.state.clamped_offset().y, 0.0));
+			} else {
+				self.follow_latest(state);
+			}
+			ui.ctx().request_repaint();
 		}
 		if let Some((message_id, attachment_id)) = self.pending_viewer
 			&& state.timeline.get(message_id).is_some()
