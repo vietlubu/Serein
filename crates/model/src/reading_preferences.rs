@@ -17,6 +17,8 @@ pub struct ReadingPreferences {
 	pub scroll_speed_percent: u16,
 	pub hide_media_links: bool,
 	pub confirm_external_links: bool,
+	/// Right-hand thread peek width in wide windows.
+	pub thread_pane_width: u16,
 }
 impl Default for ReadingPreferences {
 	fn default() -> Self {
@@ -33,6 +35,7 @@ impl Default for ReadingPreferences {
 			scroll_speed_percent: 100,
 			hide_media_links: true,
 			confirm_external_links: true,
+			thread_pane_width: 400,
 		}
 	}
 }
@@ -51,6 +54,7 @@ impl ReadingPreferences {
 			&& (190..=360).contains(&self.sidebar_width)
 			&& (25..=300).contains(&self.scroll_speed_percent)
 			&& usize::from(self.double_click_reaction) < Self::DOUBLE_CLICK_REACTIONS.len()
+			&& (320..=720).contains(&self.thread_pane_width)
 	}
 }
 
@@ -80,6 +84,7 @@ mod tests {
 						scroll_speed_percent: 100,
 						hide_media_links: true,
 						confirm_external_links: true,
+						thread_pane_width: 400,
 					};
 					assert_eq!(
 						preferences.is_valid(),

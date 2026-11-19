@@ -1727,8 +1727,15 @@ mod tests {
 			Some("Synthetic thread")
 		);
 		assert_eq!(valid.archived_thread, Some(Id(4)));
+		// A thread loaded by reference can be peeked, and the peek ends with the loaded slot.
+		assert!(matches!(
+			valid.open_thread_pane(Id(4)),
+			Some(Command::ThreadPane { .. })
+		));
+		assert!(valid.thread_pane().is_some());
 		valid.retire_archived_thread(None);
 		assert!(valid.channel(Id(4)).is_none());
+		assert!(valid.thread_pane().is_none());
 		assert_eq!(
 			valid.channel_reference_name(Id(4)),
 			Some("Synthetic thread")

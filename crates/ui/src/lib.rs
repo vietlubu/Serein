@@ -350,6 +350,8 @@ pub struct MessagingUi {
 	archive_parent: Option<Id>,
 	thread_create: thread_create::ThreadCreateUi,
 	thread_pane: thread_pane::ThreadPaneUi,
+	/// Unloaded thread and origin to peek once its channel reference read lands.
+	thread_peek: Option<(Id, Id)>,
 	new_message: new_message::NewMessageUi,
 	forum: forum::ForumUi,
 	scroll: scroll::Session,
@@ -446,6 +448,8 @@ pub struct MessagingUi {
 	pub running_processes: Option<Vec<String>>,
 	reading_sidebar_applied: Option<u16>,
 	reading_sidebar_constrained: bool,
+	thread_pane_applied: Option<u16>,
+	thread_pane_constrained: bool,
 	reading_zoom_pending: bool,
 	/// Slider value while the pointer is still down; zoom is applied on release so the
 	/// slider does not rescale under the cursor mid-drag.
@@ -5718,8 +5722,8 @@ impl MessagingUi {
 			if let Some(command) = state.continue_mark_all_read() {
 				commands.push(command);
 			}
-			self.open_thread_request(state, &mut commands, false);
-			let mut commands = self.show_overlays(ui, state, ctx, commands, settings_open, None);
+			let mut commands =
+				self.show_overlays(ui, state, ctx, commands, settings_open, None, false);
 			self.escape_shortcuts(ui.ctx(), state, &mut commands, escape_ready);
 			// No sidebar runs in this layout, so a Threads request raised this frame opens here.
 			self.take_archive_request(state, &mut commands);
@@ -5961,10 +5965,12 @@ impl MessagingUi {
 		}
 		if thread_pane_open {
 			let shortcuts_available = self.shortcuts_available(state);
-			egui::Panel::right("thread-pane")
-				.resizable(false)
+			let pane_max = self.prepare_thread_pane(ui);
+			let pane = egui::Panel::right("thread-pane")
+				.resizable(true)
 				.show_separator_line(!design::has_window_background(ui))
-				.exact_size((ui.available_width() * 0.4).clamp(320.0, 520.0))
+				.default_size(f32::from(self.reading_preferences.thread_pane_width).min(pane_max))
+				.size_range(320.0..=pane_max)
 				.frame(egui::Frame::new().fill(design::window_palette(ui).chat))
 				.show(ui, |ui| {
 					self.thread_pane.show(
@@ -5980,6 +5986,7 @@ impl MessagingUi {
 						),
 					);
 				});
+			self.record_thread_pane(pane.response.rect.width());
 		}
 		// A one-to-one DM shows the other person's profile where servers list members.
 		let dm_recipient = (show_members && wide_members)
@@ -6242,7 +6249,6 @@ impl MessagingUi {
 				}
 				self.conversation(ui, state, channel, &mut commands, message_fill);
 			});
-		self.open_thread_request(state, &mut commands, wide_members);
 		let mut commands = self.show_overlays(
 			ui,
 			state,
@@ -6250,24 +6256,10 @@ impl MessagingUi {
 			commands,
 			settings_open,
 			Some(selected_forum),
+			wide_members,
 		);
 		self.escape_shortcuts(ui.ctx(), state, &mut commands, escape_ready);
 		commands
-	}
-	/// Discord peeks a thread beside its parent; narrow windows and unloaded threads open it in full.
-	fn open_thread_request(&mut self, state: &mut State, commands: &mut Vec<Command>, wide: bool) {
-		if let Some((thread, origin)) = self.timeline.thread_open.take() {
-			match (wide && state.channel(thread).is_some())
-				.then(|| state.open_thread_pane(thread))
-				.flatten()
-			{
-				Some(command) => {
-					commands.push(command);
-					self.thread_pane.open(thread, origin);
-				}
-				None => self.timeline.channel_reference = Some(thread),
-			}
-		}
 	}
 	/// A text conversation's composer, notices and timeline below whatever header the caller
 	/// drew, with the requests they raise. The usual layout and a plugin's chat window share it.
@@ -6548,7 +6540,9 @@ impl MessagingUi {
 	/// Dialogs, overlays, the profile card, toasts and the requests they raise: everything after
 	/// the panes, in the usual and the plugin-interface layout alike. `selected_forum` is
 	/// `None` while a plugin interface hides the forum pane: its archives then float, and no
-	/// forum visit marks posts read that the user cannot see.
+	/// forum visit marks posts read that the user cannot see. `wide_members` is whether a thread
+	/// can peek beside its parent; the plugin layout has no thread pane.
+	#[allow(clippy::too_many_arguments)]
 	fn show_overlays(
 		&mut self,
 		ui: &mut egui::Ui,
@@ -6557,6 +6551,7 @@ impl MessagingUi {
 		mut commands: Vec<Command>,
 		settings_open: bool,
 		selected_forum: Option<bool>,
+		wide_members: bool,
 	) -> Vec<Command> {
 		let forum_pane = selected_forum.is_some();
 		let selected_forum = selected_forum == Some(true);
@@ -6686,6 +6681,22 @@ impl MessagingUi {
 		{
 			commands.push(command);
 		}
+		if let Some((thread, origin)) = self.timeline.thread_open.take() {
+			// Discord peeks a thread beside its parent; narrow windows open it in full. An unloaded
+			// thread (one started without a message) is read first, then peeked.
+			if wide_members && state.channel(thread).is_none() {
+				self.thread_peek = Some((thread, origin));
+				self.timeline.channel_reference = Some(thread);
+			} else if let Some(command) = wide_members
+				.then(|| state.open_thread_pane(thread))
+				.flatten()
+			{
+				commands.push(command);
+				self.thread_pane.open(thread, origin);
+			} else {
+				self.timeline.channel_reference = Some(thread);
+			}
+		}
 		if let Some(thread) = self.thread_pane.full_view.take().or(self
 			.channel_menu
 			.posts
@@ -6716,6 +6727,9 @@ impl MessagingUi {
 			self.timeline.channel_reference = Some(id);
 		}
 		if let Some(id) = self.timeline.channel_reference.take() {
+			if self.thread_peek.is_some_and(|(t, _)| t != id) {
+				self.thread_peek = None;
+			}
 			state.clear_channel_action_result(id);
 			self.timeline.pending_channel_reference = Some(id);
 		}
@@ -6724,13 +6738,26 @@ impl MessagingUi {
 				.channel(id)
 				.filter(|c| c.guild.is_some() && (c.supports_text() || matches!(c.kind, 15 | 16)))
 			{
+				let guild = target.guild;
 				self.timeline.pending_channel_reference = None;
-				self.guild = target.guild;
-				if let Some(command) = state.select(id) {
+				let peek = self
+					.thread_peek
+					.take()
+					.filter(|(t, _)| *t == id && wide_members);
+				if let Some((thread, origin)) = peek
+					&& let Some(command) = state.open_thread_pane(thread)
+				{
 					commands.push(command);
+					self.thread_pane.open(thread, origin);
+				} else {
+					self.guild = guild;
+					if let Some(command) = state.select(id) {
+						commands.push(command);
+					}
 				}
 			} else if state.channel_action_status(id).is_some() {
 				self.timeline.pending_channel_reference = None;
+				self.thread_peek = None;
 			} else if let Some(guild) = state
 				.selected
 				.and_then(|selected| state.channel(selected))
@@ -6741,6 +6768,7 @@ impl MessagingUi {
 				}
 			} else {
 				self.timeline.pending_channel_reference = None;
+				self.thread_peek = None;
 			}
 		}
 		if let Some((channel, message)) = self.timeline.leave_read.take()
