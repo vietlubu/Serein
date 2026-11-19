@@ -1103,8 +1103,8 @@ workspace test-support crate through a dev-dependency.
 
 Notification/read activity and remote notification preferences remain bounded session RAM only;
 the local notification choice is saved in `app_preferences` and defaults to on for new installs.
-When enabled, message alerts send a
-bounded sender name and message preview to the OS; an already-cached local avatar PNG may also
+When enabled, message alerts send a bounded sender name, channel/category or group name, and
+message preview to the OS; an already-cached local avatar PNG may also
 be used. Other alert kinds remain generic. The OS may keep its own notification/permission history.
 Logout invalidates queued work and requests dismissal; this does not erase OS records.
 See notification limits and platform behavior. Composer artwork uses
