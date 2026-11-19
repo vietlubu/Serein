@@ -109,6 +109,8 @@ pub struct TimelineView {
 	pub(super) quick_reaction_used: Option<&'static str>,
 	/// Requested pin change: channel, message, pinned.
 	pub(super) pin_request: Option<(Id, Id, bool)>,
+	/// Requested embed removal: channel, message, and whether Shift skipped the confirmation.
+	pub(super) suppress_embeds: Option<(Id, Id, bool)>,
 	/// Requested new thread: parent channel and the message that starts it.
 	pub(super) thread_request: Option<(Id, Id)>,
 	/// Starter message of the first visible thread card whose latest message is unknown.
@@ -4078,6 +4080,7 @@ impl TimelineView {
 												{
 													self.request_reply_target(poll);
 												}
+												let mut remove_embeds = false;
 												if let Some(gif) = crate::embeds::show(
 													ui,
 													message,
@@ -4089,8 +4092,21 @@ impl TimelineView {
 													state,
 													crate::design::MessageCardSurface::Conversation,
 													self.hide_media_links,
+													(name_hover == Some(id)
+														&& state.can_suppress_embeds(
+															message.channel,
+															id,
+														))
+													.then_some(&mut remove_embeds),
 												) {
 													self.gif_favorite = Some(gif);
+												}
+												if remove_embeds {
+													self.suppress_embeds = Some((
+														message.channel,
+														id,
+														ui.input(|i| i.modifiers.shift),
+													));
 												}
 												surface.exclude(egui::Rect::from_min_max(
 													egui::pos2(ui.max_rect().left(), embed_top),
@@ -10622,6 +10638,7 @@ mod tests {
 					},
 					crate::design::MessageCardSurface::Conversation,
 					false,
+					None,
 				);
 				assert!(
 					ui.min_rect().height() > 120.0,

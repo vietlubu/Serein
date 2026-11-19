@@ -939,6 +939,58 @@ fn role_rest_catalog_and_self_membership_revoke_selected_history_immediately() {
 }
 
 #[test]
+fn embed_suppression_needs_author_or_manage_messages() {
+	let mut state = state();
+	let embeds = vec![model::Embed {
+		url: Some("https://example.com".into()),
+		..Default::default()
+	}];
+	let mut own = message(102, Id(20));
+	own.embeds = embeds.clone();
+	own.flags = 1024;
+	let mut other = message(101, Id(20));
+	other.author.id = Id(3);
+	other.embeds = embeds;
+	apply(&mut state, Event::Message(own));
+	apply(&mut state, Event::Message(other.clone()));
+	assert!(state.can_suppress_embeds(Id(20), Id(102)));
+	assert!(!state.can_suppress_embeds(Id(20), Id(101)));
+	// Without embeds there is nothing to hide.
+	assert!(!state.can_suppress_embeds(Id(20), Id(100)));
+	// Existing flag bits survive; only SUPPRESS_EMBEDS is added.
+	assert!(matches!(
+		state.prepare_suppress_embeds(Id(20), Id(102)),
+		Some(Command::SuppressEmbeds {
+			channel: Id(20),
+			message: Id(102),
+			flags: 1028
+		})
+	));
+	let mut role = snapshot().guilds[0].roles.as_ref().unwrap()[1].clone();
+	role.bits = p::MANAGE_MESSAGES;
+	permission(
+		&mut state,
+		PermissionEvent::Role {
+			guild: Id(10),
+			role,
+		},
+	);
+	permission(
+		&mut state,
+		PermissionEvent::Member {
+			guild: Id(10),
+			roles: Patch::Value(vec![Id(11)]),
+			timeout_until: Patch::Absent,
+		},
+	);
+	assert!(state.can_suppress_embeds(Id(20), Id(101)));
+	other.embeds_suppressed = true;
+	state.timeline.insert(other, false, false).unwrap();
+	assert!(state.prepare_suppress_embeds(Id(20), Id(101)).is_none());
+	state.gateway_connected = false;
+	assert!(!state.can_suppress_embeds(Id(20), Id(102)));
+}
+#[test]
 fn message_deletion_uses_manage_messages_without_granting_edit_or_requiring_send() {
 	{
 		let mut state = state();
