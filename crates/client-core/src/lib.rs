@@ -341,6 +341,12 @@ pub enum Command {
 		message: Id,
 		pinned: bool,
 	},
+	/// Hide a message's embeds for everyone (documented SUPPRESS_EMBEDS edit).
+	SuppressEmbeds {
+		channel: Id,
+		message: Id,
+		flags: u64,
+	},
 }
 pub struct Startup {
 	/// Discord's `premium_type`: 0 none, 1 Nitro Classic, 2 Nitro, 3 Nitro Basic.

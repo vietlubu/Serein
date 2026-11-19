@@ -814,6 +814,14 @@ embeds-gallery-open-image = Open image…
 embeds-image-preview-image-actions = Image actions
 # Context: link
 embeds-link-open-link = Open link…
+# Context: remove_button
+embeds-remove-embeds = Remove all embeds
+# Context: suppress-embeds dialog
+embeds-remove-confirm-title = Remove all embeds?
+embeds-remove-confirm-body = This removes every link preview from this message for everyone. Hold Shift when clicking ✕ to skip this confirmation.
+embeds-remove-confirm = Remove All Embeds
+embeds-remove-cancel = Cancel
+embeds-remove-unavailable = Removing embeds from this message is unavailable.
 # Context: show
 embeds-show-additional-embed-content-is-not-supported = Additional embed content is not supported
 # Context: poll_result

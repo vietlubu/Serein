@@ -987,6 +987,30 @@ impl State {
 		};
 		target.guild.is_none() || self.permission(channel, p::MANAGE_MESSAGES) == Some(true)
 	}
+	/// Authors may hide their own embeds; servers also allow Manage Messages.
+	pub fn can_suppress_embeds(&self, channel: Id, message: Id) -> bool {
+		if self.auth != AuthState::Authenticated
+			|| !self.gateway_connected
+			|| !self.can_view(channel)
+		{
+			return false;
+		}
+		let Some(user) = self.user.as_ref().filter(|user| user.id.0 != 0) else {
+			return false;
+		};
+		let Some(message) = self.timeline.get(message).filter(|message| {
+			message.channel == channel
+				&& message.id.0 != 0
+				&& !message.ephemeral
+				&& !message.embeds_suppressed
+				&& !message.embeds.is_empty()
+		}) else {
+			return false;
+		};
+		message.author.id == user.id
+			|| (self.channel(channel).is_some_and(|c| c.guild.is_some())
+				&& self.permission(channel, p::MANAGE_MESSAGES) == Some(true))
+	}
 	/// True when the current pins page lists `message`.
 	pub fn is_pinned(&self, channel: Id, message: Id) -> bool {
 		self.message_actions
@@ -1034,6 +1058,18 @@ impl State {
 			return None;
 		}
 		Some(Command::Delete { channel, message })
+	}
+	pub fn prepare_suppress_embeds(&mut self, channel: Id, message: Id) -> Option<Command> {
+		if !self.can_suppress_embeds(channel, message) {
+			self.status = "Embeds on this message cannot be removed with the current access";
+			return None;
+		}
+		let flags = self.timeline.get(message)?.flags | 4;
+		Some(Command::SuppressEmbeds {
+			channel,
+			message,
+			flags,
+		})
 	}
 	pub(crate) fn permission_access(&self) -> Option<(Option<bool>, Option<bool>)> {
 		self.selected.map(|channel| {

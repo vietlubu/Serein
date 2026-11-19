@@ -1875,6 +1875,7 @@ impl SearchUi {
 										state,
 										crate::design::MessageCardSurface::Opaque,
 										false,
+										None,
 									) {
 									media.download.gif_favorite_request = Some(gif);
 								}
