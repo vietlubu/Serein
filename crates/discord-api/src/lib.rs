@@ -1189,6 +1189,32 @@ impl DiscordApi {
 		}
 		Ok(client_core::thread_previews::Loaded { channel, last })
 	}
+	/// The newest 50 messages of a peeked thread; a page naming another channel is rejected.
+	async fn thread_pane(&self, thread: Id) -> Result<Vec<model::Message>, Failure> {
+		if thread.0 == 0 {
+			return Err(Failure::Protocol);
+		}
+		let bytes = self
+			.request(
+				Method::GET,
+				&format!("/channels/{thread}/messages?limit=50"),
+				None,
+			)
+			.await?;
+		let messages: Vec<MessageDto> = decode(&bytes).map_err(|_| Failure::Protocol)?;
+		if messages.len() > 50 {
+			return Err(Failure::Capacity);
+		}
+		let messages: Vec<model::Message> =
+			messages.into_iter().map(MessageDto::into_model).collect();
+		if messages
+			.iter()
+			.any(|message| message.id.0 == 0 || message.channel != thread)
+		{
+			return Err(Failure::Protocol);
+		}
+		Ok(messages)
+	}
 	/// One bounded 50-message history page, before or after a cursor or at the latest message.
 	async fn history(
 		&self,
@@ -1526,6 +1552,11 @@ impl DiscordApi {
 				thread,
 				request,
 				result: self.thread_preview(guild, thread, needs_channel).await,
+			},
+			Command::ThreadPane { thread, request } => Event::ThreadPane {
+				thread,
+				request,
+				result: self.thread_pane(thread).await,
 			},
 			Command::Pins {
 				channel,

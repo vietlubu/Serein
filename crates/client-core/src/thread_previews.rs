@@ -197,20 +197,18 @@ impl State {
 	pub fn request_thread_preview(&mut self, message: Id) -> Option<Command> {
 		let (parent, thread) = {
 			let message = self.timeline.get_display(message)?;
-			// Only a message the service flagged as a starter names a thread, and only a
+			// Only a flagged starter or a "started a thread" row names a thread, and only a
 			// server channel holds threads at all.
-			if message.flags & model::HAS_THREAD == 0 {
+			if message.flags & model::HAS_THREAD == 0 && message.kind != 18 {
 				return None;
 			}
 			let parent = self.channel(message.channel)?;
 			if !self.can_view(parent.id) || !matches!(parent.kind, 0 | 5 | 10..=12 | 15 | 16) {
 				return None;
 			}
-			let thread = if self.unloaded_thread(message).is_some() {
-				message.id
-			} else {
-				self.thread_of(message)?.id
-			};
+			let thread = self
+				.unloaded_thread(message)
+				.or_else(|| self.thread_of(message).map(|c| c.id))?;
 			(parent.id, thread)
 		};
 		let guild = self.channel(parent)?.guild?;
@@ -361,6 +359,7 @@ mod tests {
 			nonce: None,
 			reply_to: None,
 			kind: 0,
+			thread: None,
 			reply_deleted: false,
 			forwarded: false,
 			interaction: None,

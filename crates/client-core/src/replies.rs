@@ -574,6 +574,7 @@ mod tests {
 			revision: 0,
 			nonce: None,
 			reply_to: None,
+			thread: None,
 			reply_deleted: false,
 			interaction: None,
 			forwarded: false,

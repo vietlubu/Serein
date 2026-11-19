@@ -23,6 +23,10 @@ struct Editor {
 #[derive(Default)]
 pub(super) struct PostMenu {
 	pub shortcut_requested: Option<crate::shortcuts::Intent>,
+	/// The thread whose "Open in Full View" was chosen.
+	pub full_view_requested: Option<Id>,
+	/// The thread whose Search (false) or Pins (true) was chosen.
+	pub search_requested: Option<(Id, bool)>,
 	requested: Option<(Id, Intent)>,
 	load: Option<Id>,
 	opened: Option<egui::Id>,
@@ -41,301 +45,350 @@ impl PostMenu {
 		post: &Channel,
 		view: ShortcutView<'_>,
 	) {
+		self.sync_generation(state);
+		let id = response.id.with(("post-menu", state.generation));
+		let shown = user_menu::popup(response, id)
+			.frame(frame(&response.ctx))
+			.show(|ui| self.menu(ui, state, post, view, id, false));
+		if shown.is_none() && self.opened == Some(id) {
+			self.opened = None;
+		}
+	}
+
+	/// The `…` button of a thread header; `pane` adds "Open in Full View" for the peek.
+	pub fn dropdown(
+		&mut self,
+		ui: &mut egui::Ui,
+		state: &State,
+		post: &Channel,
+		view: ShortcutView<'_>,
+		pane: bool,
+	) {
+		self.sync_generation(state);
+		let response = crate::icons::button(
+			ui,
+			crate::icons::Icon::More,
+			28.0,
+			&crate::i18n::translate("profiles-show-more"),
+		);
+		let id = response.id.with(("post-menu", state.generation));
+		let shown = egui::Popup::menu(&response)
+			.id(id)
+			.frame(frame(ui.ctx()))
+			.show(|ui| self.menu(ui, state, post, view, id, pane));
+		if shown.is_none() && self.opened == Some(id) {
+			self.opened = None;
+		}
+	}
+
+	fn sync_generation(&mut self, state: &State) {
 		if self.generation != state.generation {
 			*self = Self {
 				generation: state.generation,
 				..Self::default()
 			};
 		}
-		let id = response.id.with(("post-menu", state.generation));
-		let colors = design::palette_for(&response.ctx);
-		let shown = user_menu::popup(response, id)
-			.frame(
-				egui::Frame::popup(&response.ctx.style_of(response.ctx.theme()))
-					.fill(colors.chat)
-					.inner_margin(8)
-					.corner_radius(8),
-			)
-			.show(|ui| {
-				if self.opened != Some(id) {
-					self.opened = Some(id);
-					self.load = Some(post.id);
-				}
-				ui.set_width(232.0);
-				// Forum posts and text-channel threads share this menu; only the noun differs.
-				let noun = noun(state, post.id);
-				let available =
-					(state.demo || state.gateway_connected) && !state.channel_action_pending();
-				let details = state.post_details(post.id);
-				let ready = available && details.is_some() && self.load.is_none();
-				let mut intent = None;
-				crate::extensions_ui::context_menu_items(
-					ui,
-					extensions::MenuTarget::Channel {
-						channel_id: post.id.to_string(),
-						guild_id: post.guild.map(|guild| guild.to_string()),
-					},
-				);
-				if row(
-					ui,
-					"post-menu-context-mark-as-read",
-					state.can_mark_channel_read(post.id),
-					false,
-				)
-				.clicked()
-				{
-					intent = Some(Intent::Read);
-				}
-				ui.separator();
-				if row(
-					ui,
-					if view.contains(Shortcut::Favorite, post.id) {
-						"post-menu-context-remove-from-favorites"
-					} else {
-						"post-menu-context-add-to-favorites"
-					},
-					view.available() && state.channel(post.id).is_some(),
-					false,
-				)
-				.on_hover_text(crate::i18n::translate(
-					"post-menu-context-favorites-are-saved-on-this-device",
-				))
-				.clicked()
-				{
-					self.shortcut_requested = Some(view.toggle(Shortcut::Favorite, post.id));
-					ui.close();
-				}
-				ui.separator();
-				let followed = details.is_some_and(|d| d.followed);
-				if row(
-					ui,
-					&if followed {
-						noun_action(
-							noun,
-							"post-menu-context-unfollow-post",
-							"post-menu-context-unfollow-thread",
-						)
-					} else {
-						noun_action(
-							noun,
-							"post-menu-context-follow-post",
-							"post-menu-context-follow-thread",
-						)
-					},
-					ready && details.is_some_and(|d| !d.archived),
-					false,
-				)
-				.clicked()
-				{
-					intent = Some(Intent::Write(Action::PostFollow(!followed)));
-				}
-				let archived = details.is_some_and(|d| d.archived);
-				let locked = details.is_some_and(|d| d.locked);
-				if state.can_edit_post(post.id)
-					&& row(
-						ui,
-						&if archived {
-							noun_action(
-								noun,
-								"post-menu-context-open-post",
-								"post-menu-context-open-thread",
-							)
-						} else {
-							noun_action(
-								noun,
-								"post-menu-context-close-post",
-								"post-menu-context-close-thread",
-							)
-						},
-						ready && (!archived || !locked || state.can_manage_post(post.id)),
-						false,
-					)
-					.clicked()
-				{
-					intent = Some(Intent::Write(Action::PostArchive(!archived)));
-				}
-				if state.can_manage_post(post.id)
-					&& row(
-						ui,
-						&if locked {
-							noun_action(
-								noun,
-								"post-menu-context-unlock-post",
-								"post-menu-context-unlock-thread",
-							)
-						} else {
-							noun_action(
-								noun,
-								"post-menu-context-lock-post",
-								"post-menu-context-lock-thread",
-							)
-						},
-						ready,
-						false,
-					)
-					.clicked()
-				{
-					intent = Some(Intent::Write(Action::PostLock(!locked)));
-				}
-				if state.can_edit_post(post.id)
-					&& row(
-						ui,
-						&noun_action(
-							noun,
-							"post-menu-context-edit-post",
-							"post-menu-context-edit-thread",
-						),
-						ready,
-						false,
-					)
-					.clicked()
-				{
-					intent = Some(Intent::Edit);
-				}
-				if row(ui, "post-menu-context-copy-link", true, false).clicked() {
-					if let Some(guild) = post.guild {
-						ui.ctx()
-							.copy_text(format!("https://discord.com/channels/{guild}/{}", post.id));
-					}
-					ui.close();
-				}
-				ui.separator();
-				ui.add_enabled_ui(ready && followed, |ui| {
-					let unmute = noun_action(
-						noun,
-						"post-menu-context-unmute-post",
-						"post-menu-context-unmute-thread",
-					);
-					if details.is_some_and(|d| d.muted) && row(ui, &unmute, true, false).clicked() {
-						intent = Some(Intent::Write(Action::PostMute(Mute::Unmute)));
-					}
-					let mute = noun_action(
-						noun,
-						"post-menu-context-mute-post",
-						"post-menu-context-mute-thread",
-					);
-					ui.menu_button(mute, |ui| {
-						for (label, mute) in [
-							(
-								"channel-menu-report-capacity-for-15-minutes",
-								Mute::For(900),
-							),
-							("channel-menu-report-capacity-for-1-hour", Mute::For(3600)),
-							("channel-menu-report-capacity-for-3-hours", Mute::For(10800)),
-							("channel-menu-report-capacity-for-8-hours", Mute::For(28800)),
-							(
-								"channel-menu-report-capacity-for-24-hours",
-								Mute::For(86400),
-							),
-							(
-								"channel-menu-context-until-i-turn-it-back-on",
-								Mute::Forever,
-							),
-						] {
-							if row(ui, label, true, false).clicked() {
-								intent = Some(Intent::Write(Action::PostMute(mute)));
-							}
-						}
-					});
-					ui.menu_button(
-						crate::i18n::translate("post-menu-context-notification-settings"),
-						|ui| {
-							for (level, label) in [
-								(0, "channel-menu-report-capacity-all-messages"),
-								(1, "channel-menu-report-capacity-only-mentions"),
-								(2, "channel-menu-report-capacity-nothing"),
-								(3, "profile-edit-form-use-default"),
-							] {
-								if ui
-									.selectable_label(
-										details.is_some_and(|d| d.level == level),
-										crate::i18n::translate_if_key(label),
-									)
-									.clicked()
-								{
-									intent = Some(Intent::Write(Action::PostNotifications(level)));
-								}
-							}
-						},
-					);
-				})
-				.response
-				.on_disabled_hover_text(noun_action(
+	}
+
+	fn menu(
+		&mut self,
+		ui: &mut egui::Ui,
+		state: &State,
+		post: &Channel,
+		view: ShortcutView<'_>,
+		id: egui::Id,
+		pane: bool,
+	) {
+		let colors = design::palette(ui);
+		if self.opened != Some(id) {
+			self.opened = Some(id);
+			self.load = Some(post.id);
+		}
+		ui.set_width(232.0);
+		if pane {
+			if row(ui, "post-menu-context-open-in-full-view", true, false).clicked() {
+				self.full_view_requested = Some(post.id);
+				ui.close();
+			}
+			ui.separator();
+		}
+		// Forum posts and text-channel threads share this menu; only the noun differs.
+		let noun = noun(state, post.id);
+		let available = (state.demo || state.gateway_connected) && !state.channel_action_pending();
+		let details = state.post_details(post.id);
+		let ready = available && details.is_some() && self.load.is_none();
+		let mut intent = None;
+		crate::extensions_ui::context_menu_items(
+			ui,
+			extensions::MenuTarget::Channel {
+				channel_id: post.id.to_string(),
+				guild_id: post.guild.map(|guild| guild.to_string()),
+			},
+		);
+		if row(
+			ui,
+			"post-menu-context-mark-as-read",
+			state.can_mark_channel_read(post.id),
+			false,
+		)
+		.clicked()
+		{
+			intent = Some(Intent::Read);
+		}
+		ui.separator();
+		if row(
+			ui,
+			if view.contains(Shortcut::Favorite, post.id) {
+				"post-menu-context-remove-from-favorites"
+			} else {
+				"post-menu-context-add-to-favorites"
+			},
+			view.available() && state.channel(post.id).is_some(),
+			false,
+		)
+		.on_hover_text(crate::i18n::translate(
+			"post-menu-context-favorites-are-saved-on-this-device",
+		))
+		.clicked()
+		{
+			self.shortcut_requested = Some(view.toggle(Shortcut::Favorite, post.id));
+			ui.close();
+		}
+		ui.separator();
+		let followed = details.is_some_and(|d| d.followed);
+		if row(
+			ui,
+			&if followed {
+				noun_action(
 					noun,
-					"post-menu-context-follow-this-post-to-change-its-notifications",
-					"post-menu-context-follow-this-thread-to-change-its-notifications",
-				));
-				if state.can_manage_post(post.id) {
-					ui.separator();
-					let pinned = details.is_some_and(|d| d.pinned);
-					if row(
-						ui,
-						&if pinned {
-							noun_action(
-								noun,
-								"post-menu-context-unpin-post",
-								"post-menu-context-unpin-thread",
-							)
-						} else {
-							noun_action(
-								noun,
-								"post-menu-context-pin-post",
-								"post-menu-context-pin-thread",
-							)
-						},
-						ready,
-						false,
+					"post-menu-context-unfollow-post",
+					"post-menu-context-unfollow-thread",
+				)
+			} else {
+				noun_action(
+					noun,
+					"post-menu-context-follow-post",
+					"post-menu-context-follow-thread",
+				)
+			},
+			ready && details.is_some_and(|d| !d.archived),
+			false,
+		)
+		.clicked()
+		{
+			intent = Some(Intent::Write(Action::PostFollow(!followed)));
+		}
+		let archived = details.is_some_and(|d| d.archived);
+		let locked = details.is_some_and(|d| d.locked);
+		if state.can_edit_post(post.id)
+			&& row(
+				ui,
+				&if archived {
+					noun_action(
+						noun,
+						"post-menu-context-open-post",
+						"post-menu-context-open-thread",
 					)
-					.clicked()
-					{
-						intent = Some(Intent::Write(Action::PostPin(!pinned)));
-					}
-					if row(
-						ui,
-						&noun_action(
-							noun,
-							"post-menu-context-delete-post",
-							"post-menu-context-delete-thread",
-						),
-						ready,
-						true,
+				} else {
+					noun_action(
+						noun,
+						"post-menu-context-close-post",
+						"post-menu-context-close-thread",
 					)
-					.clicked()
-					{
-						intent = Some(Intent::Delete);
+				},
+				ready && (!archived || !locked || state.can_manage_post(post.id)),
+				false,
+			)
+			.clicked()
+		{
+			intent = Some(Intent::Write(Action::PostArchive(!archived)));
+		}
+		if state.can_manage_post(post.id)
+			&& row(
+				ui,
+				&if locked {
+					noun_action(
+						noun,
+						"post-menu-context-unlock-post",
+						"post-menu-context-unlock-thread",
+					)
+				} else {
+					noun_action(
+						noun,
+						"post-menu-context-lock-post",
+						"post-menu-context-lock-thread",
+					)
+				},
+				ready,
+				false,
+			)
+			.clicked()
+		{
+			intent = Some(Intent::Write(Action::PostLock(!locked)));
+		}
+		if state.can_edit_post(post.id)
+			&& row(
+				ui,
+				&noun_action(
+					noun,
+					"post-menu-context-edit-post",
+					"post-menu-context-edit-thread",
+				),
+				ready,
+				false,
+			)
+			.clicked()
+		{
+			intent = Some(Intent::Edit);
+		}
+		if row(ui, "post-menu-context-search", true, false).clicked() {
+			self.search_requested = Some((post.id, false));
+			ui.close();
+		}
+		if row(ui, "post-menu-context-pins", true, false).clicked() {
+			self.search_requested = Some((post.id, true));
+			ui.close();
+		}
+		if row(ui, "post-menu-context-copy-link", true, false).clicked() {
+			if let Some(guild) = post.guild {
+				ui.ctx()
+					.copy_text(format!("https://discord.com/channels/{guild}/{}", post.id));
+			}
+			ui.close();
+		}
+		ui.separator();
+		ui.add_enabled_ui(ready && followed, |ui| {
+			let unmute = noun_action(
+				noun,
+				"post-menu-context-unmute-post",
+				"post-menu-context-unmute-thread",
+			);
+			if details.is_some_and(|d| d.muted) && row(ui, &unmute, true, false).clicked() {
+				intent = Some(Intent::Write(Action::PostMute(Mute::Unmute)));
+			}
+			let mute = noun_action(
+				noun,
+				"post-menu-context-mute-post",
+				"post-menu-context-mute-thread",
+			);
+			ui.menu_button(mute, |ui| {
+				for (label, mute) in [
+					(
+						"channel-menu-report-capacity-for-15-minutes",
+						Mute::For(900),
+					),
+					("channel-menu-report-capacity-for-1-hour", Mute::For(3600)),
+					("channel-menu-report-capacity-for-3-hours", Mute::For(10800)),
+					("channel-menu-report-capacity-for-8-hours", Mute::For(28800)),
+					(
+						"channel-menu-report-capacity-for-24-hours",
+						Mute::For(86400),
+					),
+					(
+						"channel-menu-context-until-i-turn-it-back-on",
+						Mute::Forever,
+					),
+				] {
+					if row(ui, label, true, false).clicked() {
+						intent = Some(Intent::Write(Action::PostMute(mute)));
 					}
-				}
-				ui.separator();
-				if row(ui, "post-menu-context-copy-thread-id", true, false).clicked() {
-					ui.ctx().copy_text(post.id.to_string());
-					ui.close();
-				}
-				if self.load.is_some() || state.channel_action_pending() {
-					ui.label(format!(
-						"{} {} {}…",
-						crate::i18n::translate("post-menu-context-loading"),
-						crate::i18n::translate_if_key(noun).to_lowercase(),
-						crate::i18n::translate("post-menu-context-settings")
-					));
-				} else if let Some(error) = state
-					.channel_action_status(post.id)
-					.filter(|_| !state.channel_action_succeeded(post.id))
-				{
-					ui.colored_label(colors.danger, error);
-					if ui
-						.button(crate::i18n::translate("post-menu-context-retry"))
-						.clicked()
-					{
-						self.load = Some(post.id);
-					}
-				}
-				if let Some(intent) = intent {
-					self.requested = Some((post.id, intent));
-					ui.close();
 				}
 			});
-		if shown.is_none() && self.opened == Some(id) {
-			self.opened = None;
+			ui.menu_button(
+				crate::i18n::translate("post-menu-context-notification-settings"),
+				|ui| {
+					for (level, label) in [
+						(0, "channel-menu-report-capacity-all-messages"),
+						(1, "channel-menu-report-capacity-only-mentions"),
+						(2, "channel-menu-report-capacity-nothing"),
+						(3, "profile-edit-form-use-default"),
+					] {
+						if ui
+							.selectable_label(
+								details.is_some_and(|d| d.level == level),
+								crate::i18n::translate_if_key(label),
+							)
+							.clicked()
+						{
+							intent = Some(Intent::Write(Action::PostNotifications(level)));
+						}
+					}
+				},
+			);
+		})
+		.response
+		.on_disabled_hover_text(noun_action(
+			noun,
+			"post-menu-context-follow-this-post-to-change-its-notifications",
+			"post-menu-context-follow-this-thread-to-change-its-notifications",
+		));
+		if state.can_manage_post(post.id) {
+			ui.separator();
+			let pinned = details.is_some_and(|d| d.pinned);
+			if row(
+				ui,
+				&if pinned {
+					noun_action(
+						noun,
+						"post-menu-context-unpin-post",
+						"post-menu-context-unpin-thread",
+					)
+				} else {
+					noun_action(
+						noun,
+						"post-menu-context-pin-post",
+						"post-menu-context-pin-thread",
+					)
+				},
+				ready,
+				false,
+			)
+			.clicked()
+			{
+				intent = Some(Intent::Write(Action::PostPin(!pinned)));
+			}
+			if row(
+				ui,
+				&noun_action(
+					noun,
+					"post-menu-context-delete-post",
+					"post-menu-context-delete-thread",
+				),
+				ready,
+				true,
+			)
+			.clicked()
+			{
+				intent = Some(Intent::Delete);
+			}
+		}
+		ui.separator();
+		if row(ui, "post-menu-context-copy-thread-id", true, false).clicked() {
+			ui.ctx().copy_text(post.id.to_string());
+			ui.close();
+		}
+		if self.load.is_some() || state.channel_action_pending() {
+			ui.label(format!(
+				"{} {} {}…",
+				crate::i18n::translate("post-menu-context-loading"),
+				crate::i18n::translate_if_key(noun).to_lowercase(),
+				crate::i18n::translate("post-menu-context-settings")
+			));
+		} else if let Some(error) = state
+			.channel_action_status(post.id)
+			.filter(|_| !state.channel_action_succeeded(post.id))
+		{
+			ui.colored_label(colors.danger, error);
+			if ui
+				.button(crate::i18n::translate("post-menu-context-retry"))
+				.clicked()
+			{
+				self.load = Some(post.id);
+			}
+		}
+		if let Some(intent) = intent {
+			self.requested = Some((post.id, intent));
+			ui.close();
 		}
 	}
 
@@ -580,6 +633,13 @@ impl PostMenu {
 			self.editor = None;
 		}
 	}
+}
+
+fn frame(ctx: &egui::Context) -> egui::Frame {
+	egui::Frame::popup(&ctx.style_of(ctx.theme()))
+		.fill(design::palette_for(ctx).chat)
+		.inner_margin(8)
+		.corner_radius(8)
 }
 
 /// "Post" inside a forum, "Thread" anywhere else; both use the same bounded channel actions.

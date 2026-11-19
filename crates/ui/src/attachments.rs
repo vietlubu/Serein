@@ -1880,6 +1880,7 @@ mod tests {
 			nonce: None,
 			reply_to: None,
 			kind: 0,
+			thread: None,
 			reply_deleted: false,
 			interaction: None,
 			forwarded: false,

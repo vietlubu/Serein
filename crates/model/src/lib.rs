@@ -458,6 +458,9 @@ pub struct Message {
 	pub nonce: Option<String>,
 	/// The replied-to message, or the closed poll of a poll result (type 46).
 	pub reply_to: Option<Id>,
+	/// Thread a "started a thread" row (type 18) announces, from its `message_reference.channel_id`.
+	/// Unofficial: not in the documented reference table; not persisted.
+	pub thread: Option<Id>,
 	/// Discord message type; 255 denotes an unknown legacy cached type.
 	pub kind: u8,
 	/// The service explicitly returned a null referenced message, not an unresolved preview.

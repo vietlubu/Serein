@@ -260,6 +260,7 @@ impl Timeline {
 						|| previous.unsupported != message.unsupported
 						|| previous.kind != message.kind
 						|| previous.reply_deleted != message.reply_deleted
+						|| previous.thread != message.thread
 						|| previous.sticker_items != message.sticker_items
 						|| previous.extra_content != message.extra_content
 						|| previous.embeds != message.embeds
@@ -1373,6 +1374,7 @@ mod tests {
 			nonce: None,
 			reply_to: None,
 			kind: 0,
+			thread: None,
 			reply_deleted: false,
 			interaction: None,
 			forwarded: false,

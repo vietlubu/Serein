@@ -110,6 +110,7 @@ fn message(id: Id, channel: Id, content: String) -> Message {
 		nonce: None,
 		reply_to: None,
 		interaction: None,
+		thread: None,
 		reply_deleted: false,
 		forwarded: false,
 		unsupported: false,

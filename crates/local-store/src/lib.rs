@@ -1396,6 +1396,8 @@ impl LocalStore {
 				unsupported: row.get(6)?,
 				extra_content,
 				kind: row.get(14)?,
+				// Not persisted: the next history read restores a type-18 row's thread.
+				thread: None,
 				reply_deleted,
 				forwarded: row.get(18)?,
 				interaction,
@@ -3556,6 +3558,7 @@ mod tests {
 				unsupported: false,
 				extra_content: model::ExtraContent::default(),
 				kind: 0,
+				thread: None,
 				reply_deleted: false,
 				interaction: None,
 				forwarded: false,

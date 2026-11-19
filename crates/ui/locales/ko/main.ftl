@@ -2014,6 +2014,8 @@ post-menu-context-mute-thread = 스레드 알림 끄기
 # Context: context
 post-menu-context-notification-settings = 알림 설정
 # Context: context
+post-menu-context-open-in-full-view = 전체 보기로 열기
+# Context: context
 post-menu-context-open-post = 게시물 열기
 # Context: context
 post-menu-context-open-thread = 스레드 열기
@@ -2022,9 +2024,13 @@ post-menu-context-pin-post = 게시물 고정
 # Context: context
 post-menu-context-pin-thread = 스레드 고정
 # Context: context
+post-menu-context-pins = 고정된 메시지
+# Context: context
 post-menu-context-remove-from-favorites = 즐겨찾기에서 제거
 # Context: context
 post-menu-context-retry = 다시 시도
+# Context: context
+post-menu-context-search = 검색
 # Context: context
 post-menu-context-settings = 설정
 # Context: context
@@ -3898,6 +3904,24 @@ thread-create-show-everyone-who-can-see-this-channel-can-see-the-thread = 이 �
 thread-create-show-the-selected-message-starts-the-thread-everyone-who-can-see = 선택한 메시지로 스레드를 시작합니다. 이 채널을 볼 수 있는 모든 사람이 스레드를 볼 수 있습니다.
 # Context: show
 thread-create-show-thread-name = 스레드 이름
+
+## crates/ui/src/thread_pane.rs
+# Context: show
+thread-pane-close = 닫기
+# Context: show
+thread-pane-empty = 이 스레드에는 아직 메시지가 없어요.
+# Context: show
+thread-pane-failed = 이 스레드를 불러오지 못했어요.
+# Context: show
+thread-pane-loading = 스레드를 불러오는 중…
+# Context: content
+thread-pane-media = 첨부 파일: { $count }
+# Context: show
+thread-pane-message-hint = “{ $thread }”에 메시지 보내기
+# Context: show
+thread-pane-not-sent = 보내지 못했어요. 스레드를 열어 다시 시도하세요.
+# Context: show
+thread-pane-started-by = { $name }님이 시작함
 
 ## crates/ui/src/timeline.rs
 # Context: channel_welcome
