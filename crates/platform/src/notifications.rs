@@ -5,13 +5,19 @@ use std::sync::{
 	mpsc::{self, Receiver, SyncSender},
 };
 
-// Windows delivers activation through its callback; other platforms retain one cancellable future.
+// Windows delivers activation through its callback; other platforms retain a cancellable future per alert.
 #[cfg(target_os = "windows")]
 type NotificationHandle = ();
 #[cfg(not(target_os = "windows"))]
 struct NotificationHandle {
-	response: Option<std::pin::Pin<Box<dyn std::future::Future<Output = ()>>>>,
+	response: std::pin::Pin<Box<dyn Future<Output = ()>>>,
 	close: Box<dyn FnOnce()>,
+}
+
+/// A delivered alert; `key` is `(channel, message)` for channel alerts.
+struct Shown {
+	key: Option<(model::Id, model::Id)>,
+	handle: NotificationHandle,
 }
 
 #[derive(Clone)]
@@ -35,6 +41,8 @@ impl Activation {
 
 // Eight bounded commands; overflow drops an alert, never message state.
 const QUEUE_ITEMS: usize = 8;
+// Each tracked macOS banner costs one delivered-notifications poll every 500 ms.
+const MAX_SHOWN: usize = 32;
 const GENERIC_BODY: &str = "You have a new message.";
 const TITLE_BYTES: usize = 256;
 const BODY_BYTES: usize = 512;
@@ -87,8 +95,9 @@ struct Alert {
 
 struct Command {
 	generation: u64,
-	channel: Option<model::Id>,
+	key: Option<(model::Id, model::Id)>,
 	alert: Option<Alert>,
+	close: Vec<(model::Id, model::Id)>,
 }
 
 /// Created without OS calls or a thread. The worker starts only when the device setting is enabled.
@@ -100,7 +109,10 @@ pub struct Notifications {
 	status: Arc<AtomicU64>,
 	wake: Arc<dyn Fn() + Send + Sync>,
 	restore: Arc<dyn Fn() + Send + Sync>,
-	channel: std::cell::Cell<Option<model::Id>>,
+	/// Delivered channel alerts, oldest first, mirrored for read-close.
+	shown: Vec<(model::Id, model::Id)>,
+	/// Generation at which notifications were last enabled.
+	session: Arc<AtomicU64>,
 }
 
 impl Notifications {
@@ -119,7 +131,8 @@ impl Notifications {
 			status: Arc::new(AtomicU64::new(0)),
 			wake: Arc::new(wake),
 			restore: Arc::new(restore),
-			channel: std::cell::Cell::new(None),
+			shown: Vec::new(),
+			session: Arc::new(AtomicU64::new(0)),
 		}
 	}
 
@@ -129,6 +142,11 @@ impl Notifications {
 			return;
 		}
 		let generation = self.generation.fetch_add(1, Ordering::AcqRel) + 1;
+		if enabled {
+			self.session.store(generation, Ordering::Release);
+		} else {
+			self.shown.clear();
+		}
 		self.status.store(
 			encoded(
 				generation,
@@ -147,9 +165,10 @@ impl Notifications {
 			let wake = Arc::clone(&self.wake);
 			let restore = Arc::clone(&self.restore);
 			let activated = self.activation_send.clone();
+			let session = Arc::clone(&self.session);
 			if std::thread::Builder::new()
 				.name("serein-notifications".into())
-				.spawn(move || worker(receive, current, status, wake, restore, activated))
+				.spawn(move || worker(receive, current, session, status, wake, restore, activated))
 				.is_err()
 			{
 				self.status
@@ -162,7 +181,8 @@ impl Notifications {
 		if let Some(send) = &self.send {
 			let _ = send.try_send(Command {
 				generation,
-				channel: None,
+				key: None,
+				close: Vec::new(),
 				alert: None,
 			});
 		}
@@ -173,7 +193,8 @@ impl Notifications {
 		self.set_enabled(false);
 	}
 
-	/// Invalidate pending/outstanding alerts after read, mute, DND or connection changes.
+	/// Cancel queued, not-yet-shown alerts after mute, DND, access or connection changes.
+	/// Delivered alerts stay until read, answered, or the session ends.
 	/// Retains the session opt-in and does not request OS authorization again.
 	pub fn dismiss(&mut self) {
 		let result = match self.status() {
@@ -186,45 +207,70 @@ impl Notifications {
 		if let Some(send) = &self.send {
 			let _ = send.try_send(Command {
 				generation,
-				channel: None,
+				key: None,
+				close: Vec::new(),
 				alert: None,
 			});
 		}
 	}
 
 	/// Queue a privacy-preserving generic alert. False means disabled, unavailable or overloaded.
-	pub fn notify(&self) -> bool {
+	pub fn notify(&mut self) -> bool {
 		self.enqueue(Alert {
 			title: "Serein".into(),
 			body: GENERIC_BODY.into(),
 			image_path: None,
 		})
 	}
-	pub fn notify_message(&self, title: String, body: String, image_path: Option<String>) -> bool {
-		self.message(None, title, body, image_path)
-	}
-	pub fn notify_channel(
-		&self,
-		channel: model::Id,
+	pub fn notify_message(
+		&mut self,
 		title: String,
 		body: String,
 		image_path: Option<String>,
 	) -> bool {
-		self.message(Some(channel), title, body, image_path)
+		self.message(None, title, body, image_path)
 	}
-	/// Channel of the latest queued alert; the worker shows only the newest one.
-	pub fn channel(&self) -> Option<model::Id> {
-		self.channel.get()
+	pub fn notify_channel(
+		&mut self,
+		channel: model::Id,
+		message: model::Id,
+		title: String,
+		body: String,
+		image_path: Option<String>,
+	) -> bool {
+		self.message(Some((channel, message)), title, body, image_path)
 	}
+	/// Close delivered channel alerts whose message `read(channel, message)` reports read.
+	pub fn close_read(&mut self, read: impl Fn(model::Id, model::Id) -> bool) {
+		let Some(send) = &self.send else { return };
+		let close: Vec<_> = self
+			.shown
+			.extract_if(.., |&mut (channel, message)| read(channel, message))
+			.collect();
+		if close.is_empty() {
+			return;
+		}
+		// A full queue keeps the keys so the next read change retries.
+		if let Err(mpsc::TrySendError::Full(command)) = send.try_send(Command {
+			generation: self.generation.load(Ordering::Acquire),
+			key: None,
+			alert: None,
+			close,
+		}) {
+			self.shown.extend(command.close);
+		}
+	}
+	/// Clicks survive dismissals but not a disable/re-enable.
 	pub fn take_activation(&self) -> Option<model::Id> {
 		let current = self.generation.load(Ordering::Acquire);
+		let session = self.session.load(Ordering::Acquire);
 		self.activated.try_iter().find_map(|(generation, channel)| {
-			(current & 1 != 0 && current == generation).then_some(channel)
+			(current & 1 != 0 && generation >= session).then_some(channel)
 		})
 	}
 	fn message(
-		&self,
-		channel: Option<model::Id>,
+		&mut self,
+		key: Option<(model::Id, model::Id)>,
 		title: String,
 		body: String,
 		image_path: Option<String>,
@@ -243,13 +289,13 @@ impl Notifications {
 				body: body.into_boxed_str(),
 				image_path: image_path.map(String::into_boxed_str),
 			},
-			channel,
+			key,
 		)
 	}
-	fn enqueue(&self, alert: Alert) -> bool {
+	fn enqueue(&mut self, alert: Alert) -> bool {
 		self.enqueue_channel(alert, None)
 	}
-	fn enqueue_channel(&self, alert: Alert, channel: Option<model::Id>) -> bool {
+	fn enqueue_channel(&mut self, alert: Alert, key: Option<(model::Id, model::Id)>) -> bool {
 		if !matches!(self.status(), Status::Ready | Status::QueueFull) {
 			return false;
 		}
@@ -257,11 +303,17 @@ impl Notifications {
 		let Some(send) = &self.send else { return false };
 		match send.try_send(Command {
 			generation,
-			channel,
+			key,
 			alert: Some(alert),
+			close: Vec::new(),
 		}) {
 			Ok(()) => {
-				self.channel.set(channel);
+				if let Some(key) = key {
+					if self.shown.len() >= MAX_SHOWN {
+						self.shown.remove(0);
+					}
+					self.shown.push(key);
+				}
 				true
 			}
 			Err(error) => {
@@ -311,29 +363,24 @@ fn encoded(generation: u64, status: Status) -> u64 {
 fn worker(
 	receive: Receiver<Command>,
 	current: Arc<AtomicU64>,
+	session: Arc<AtomicU64>,
 	status: Arc<AtomicU64>,
 	wake: Arc<dyn Fn() + Send + Sync>,
 	restore: Arc<dyn Fn() + Send + Sync>,
 	activated: SyncSender<(u64, model::Id)>,
 ) {
 	let mut generation = 0;
+	let mut started = 0;
 	let mut outcome = Status::Disabled;
-	let mut outstanding: Option<NotificationHandle> = None;
+	let mut shown: Vec<Shown> = Vec::new();
 	loop {
+		// A resolved response means the OS alert was answered or dismissed; it is already gone.
 		#[cfg(not(target_os = "windows"))]
-		if let Some(handle) = &mut outstanding
-			&& let Some(response) = &mut handle.response
-			&& response
-				.as_mut()
-				.poll(&mut std::task::Context::from_waker(std::task::Waker::noop()))
-				.is_ready()
-		{
-			handle.response = None;
-		}
-		#[cfg(not(target_os = "windows"))]
-		let waiting = outstanding
-			.as_ref()
-			.is_some_and(|handle| handle.response.is_some());
+		let waiting = {
+			let mut cx = std::task::Context::from_waker(std::task::Waker::noop());
+			shown.retain_mut(|entry| entry.handle.response.as_mut().poll(&mut cx).is_pending());
+			!shown.is_empty()
+		};
 		#[cfg(target_os = "windows")]
 		let waiting = false;
 		let command = if waiting {
@@ -348,7 +395,12 @@ fn worker(
 		};
 		let active = current.load(Ordering::Acquire);
 		if active != generation {
-			close(&mut outstanding);
+			let session_start = session.load(Ordering::Acquire);
+			// Dismissals only cancel queued alerts; delivered ones stay until read, answered or the session ends.
+			if active & 1 == 0 || session_start != started {
+				close_all(&mut shown);
+				started = session_start;
+			}
 			let was_enabled = generation & 1 != 0;
 			generation = active;
 			outcome = if generation & 1 == 0 {
@@ -363,6 +415,12 @@ fn worker(
 			publish(&status, generation, outcome);
 			wake();
 		}
+		// Reads close alerts across dismissals, so this ignores the command generation.
+		for entry in shown.extract_if(.., |entry| {
+			entry.key.is_some_and(|key| command.close.contains(&key))
+		}) {
+			close(entry);
+		}
 		if outcome != Status::Ready
 			|| command.alert.is_none()
 			|| command.generation != generation
@@ -370,29 +428,34 @@ fn worker(
 		{
 			continue;
 		}
-		// Keep at most one notification/response handle, including in OS history where supported.
-		close(&mut outstanding);
 		let activation = Activation {
 			send: activated.clone(),
 			generation,
-			channel: command.channel,
+			channel: command.key.map(|(channel, _)| channel),
 			wake: Arc::clone(&wake),
 			restore: Arc::clone(&restore),
 		};
 		outcome = match show(command.alert.as_ref().expect("checked above"), activation) {
 			Ok(handle) => {
-				outstanding = Some(handle);
+				if shown.len() >= MAX_SHOWN {
+					// shortcut: the oldest alert stays visible but loses click routing and read-close; raise MAX_SHOWN if users keep more alerts.
+					shown.remove(0);
+				}
+				shown.push(Shown {
+					key: command.key,
+					handle,
+				});
 				Status::Ready
 			}
 			Err(()) => Status::Unavailable,
 		};
-		if current.load(Ordering::Acquire) != generation {
-			close(&mut outstanding);
+		if current.load(Ordering::Acquire) & 1 == 0 || session.load(Ordering::Acquire) != started {
+			close_all(&mut shown);
 		}
 		publish(&status, generation, outcome);
 		wake();
 	}
-	close(&mut outstanding);
+	close_all(&mut shown);
 }
 
 fn publish(status: &AtomicU64, generation: u64, outcome: Status) {
@@ -489,7 +552,7 @@ fn show(alert: &Alert, activation: Activation) -> Result<NotificationHandle, ()>
 		let handle = futures_lite::future::block_on(native.send()).map_err(|_| ())?;
 		let id = handle.notification_id().to_owned();
 		Ok(NotificationHandle {
-			response: Some(Box::pin(async move {
+			response: Box::pin(async move {
 				if handle
 					.response()
 					.await
@@ -497,7 +560,7 @@ fn show(alert: &Alert, activation: Activation) -> Result<NotificationHandle, ()>
 				{
 					activation.clicked();
 				}
-			})),
+			}),
 			close: Box::new(move || {
 				futures_lite::future::block_on(mac_usernotifications::close_delivered(&id))
 			}),
@@ -508,7 +571,7 @@ fn show(alert: &Alert, activation: Activation) -> Result<NotificationHandle, ()>
 		let handle = Arc::new(notification(alert).show().map_err(|_| ())?);
 		let response_handle = Arc::clone(&handle);
 		Ok(NotificationHandle {
-			response: Some(Box::pin(async move {
+			response: Box::pin(async move {
 				response_handle
 					.wait_for_action_async(|response| {
 						if response.is_default_action() {
@@ -516,7 +579,7 @@ fn show(alert: &Alert, activation: Activation) -> Result<NotificationHandle, ()>
 						}
 					})
 					.await;
-			})),
+			}),
 			close: Box::new(move || {
 				if let Ok(handle) = Arc::try_unwrap(handle) {
 					handle.close();
@@ -572,17 +635,24 @@ fn notification(alert: &Alert) -> notify_rust::Notification {
 	notification
 }
 
-fn close(outstanding: &mut Option<NotificationHandle>) {
-	#[cfg(not(target_os = "windows"))]
-	if let Some(handle) = outstanding.take() {
-		drop(handle.response);
-		(handle.close)();
-	}
-	#[cfg(target_os = "windows")]
-	if outstanding.take().is_some() {
-		use windows::{UI::Notifications::ToastNotificationManager, core::HSTRING};
-		let _ = ToastNotificationManager::History()
-			.and_then(|history| history.ClearWithId(&HSTRING::from("cz.viceverse.serein")));
+#[cfg(not(target_os = "windows"))]
+fn close(Shown { handle, .. }: Shown) {
+	// Dropping the response first releases Linux's shared handle for `close`.
+	drop(handle.response);
+	(handle.close)();
+}
+
+// Windows exposes no per-toast handle here, so closing one alert clears Serein's toast history.
+#[cfg(target_os = "windows")]
+fn close(Shown { handle: (), .. }: Shown) {
+	use windows::{UI::Notifications::ToastNotificationManager, core::HSTRING};
+	let _ = ToastNotificationManager::History()
+		.and_then(|history| history.ClearWithId(&HSTRING::from("cz.viceverse.serein")));
+}
+
+fn close_all(shown: &mut Vec<Shown>) {
+	for entry in shown.drain(..) {
+		close(entry);
 	}
 }
 
@@ -605,7 +675,7 @@ pub fn debug_activation_check(channel: model::Id) -> model::Id {
 	assert_eq!(selected, channel);
 	click.clicked();
 	notifications.dismiss();
-	assert_eq!(notifications.take_activation(), None);
+	assert_eq!(notifications.take_activation(), Some(channel));
 	click.clicked();
 	notifications.clear();
 	assert_eq!(notifications.take_activation(), None);
@@ -693,7 +763,10 @@ mod tests {
 			);
 		}
 		assert!(
-			(std::mem::size_of::<Command>() + TITLE_BYTES + BODY_BYTES + IMAGE_PATH_BYTES)
+			(std::mem::size_of::<Command>()
+				+ TITLE_BYTES
+				+ BODY_BYTES + IMAGE_PATH_BYTES
+				+ MAX_SHOWN * std::mem::size_of::<(model::Id, model::Id)>())
 				* QUEUE_ITEMS
 				<= 16 * 1024
 		);
@@ -719,6 +792,50 @@ mod tests {
 				None
 			));
 			assert!(receive.try_recv().is_err());
+
+			// Dismissals keep delivered alerts; only their read message closes them, once.
+			let id = model::Id;
+			assert!(notifications.notify_channel(id(7), id(70), "A".into(), "B".into(), None));
+			assert!(receive.try_recv().unwrap().alert.is_some());
+			notifications.dismiss();
+			assert!(receive.try_recv().unwrap().alert.is_none());
+			notifications.close_read(|_, message| message > id(70));
+			assert!(receive.try_recv().is_err());
+			notifications.close_read(|channel, message| channel == id(7) && message <= id(70));
+			let command = receive.try_recv().unwrap();
+			assert_eq!(command.close, vec![(id(7), id(70))]);
+			assert!(command.alert.is_none());
+			notifications.close_read(|_, _| true);
+			assert!(receive.try_recv().is_err());
+
+			for message in 0..=MAX_SHOWN as u64 {
+				assert!(notifications.notify_channel(
+					id(8),
+					id(message),
+					"A".into(),
+					"B".into(),
+					None
+				));
+				receive.try_recv().unwrap();
+			}
+			assert_eq!(notifications.shown.len(), MAX_SHOWN);
+
+			// Clicks survive dismissals but not a disable/re-enable.
+			let generation = notifications.generation.load(Ordering::Acquire);
+			notifications
+				.activation_send
+				.try_send((generation, id(7)))
+				.unwrap();
+			notifications.dismiss();
+			assert_eq!(notifications.take_activation(), Some(id(7)));
+			notifications.clear();
+			assert!(notifications.shown.is_empty());
+			notifications.set_enabled(true);
+			notifications
+				.activation_send
+				.try_send((generation, id(7)))
+				.unwrap();
+			assert_eq!(notifications.take_activation(), None);
 		}
 	}
 }
