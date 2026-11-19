@@ -5062,6 +5062,7 @@ impl MessagingUi {
 			self.extensions.report_error(error);
 		}
 		self.keybinds_shortcut(&ctx);
+		let escape_ready = self.navigation_shortcuts(&ctx, state, &mut commands);
 		self.theme_preview_navigation(ui);
 		let settings_open =
 			self.settings.open || self.server_settings.is_open() || self.channel_menu.is_open();
@@ -6550,6 +6551,7 @@ impl MessagingUi {
 			profile_guild,
 			&mut commands,
 		);
+		self.escape_shortcuts(&ctx, state, &mut commands, escape_ready);
 		if !commands.is_empty() {
 			ctx.request_repaint();
 		}
@@ -8245,6 +8247,91 @@ mod composer_tests {
 			view.editing.as_ref().unwrap().2,
 			"Keep this unfinished edit"
 		);
+	}
+
+	#[test]
+	fn keyboard_shortcuts_walk_sidebar_history_and_yield_escape_to_open_panes() {
+		fn frame(
+			ctx: &egui::Context,
+			view: &mut MessagingUi,
+			state: &mut State,
+			events: Vec<egui::Event>,
+		) {
+			let output = ctx.run_ui(
+				egui::RawInput {
+					screen_rect: Some(egui::Rect::from_min_size(
+						egui::Pos2::ZERO,
+						egui::vec2(1200.0, 800.0),
+					)),
+					focused: true,
+					events,
+					..Default::default()
+				},
+				|ui| {
+					view.show(ui, state);
+				},
+			);
+			output.drop_without_applying_deltas();
+		}
+		let key = |key, modifiers| {
+			vec![egui::Event::Key {
+				key,
+				physical_key: None,
+				pressed: true,
+				repeat: false,
+				modifiers,
+			}]
+		};
+		let ctx = egui::Context::default();
+		let mut state = edit_state();
+		let mut other = state.channels[0].clone();
+		other.id = Id(11);
+		other.name = "Other conversation".into();
+		state.channels.push(other);
+		state.selected = None;
+		let _ = state.select(Id(10));
+		let mut view = MessagingUi::default();
+		frame(&ctx, &mut view, &mut state, vec![]);
+		frame(&ctx, &mut view, &mut state, vec![]);
+		// Equal-activity DMs list the higher id first, so 11 sits above 10.
+		frame(
+			&ctx,
+			&mut view,
+			&mut state,
+			key(egui::Key::ArrowUp, egui::Modifiers::ALT),
+		);
+		assert_eq!(state.selected, Some(Id(11)));
+		frame(
+			&ctx,
+			&mut view,
+			&mut state,
+			key(egui::Key::OpenBracket, egui::Modifiers::COMMAND),
+		);
+		assert_eq!(state.selected, Some(Id(10)));
+		frame(
+			&ctx,
+			&mut view,
+			&mut state,
+			key(egui::Key::CloseBracket, egui::Modifiers::COMMAND),
+		);
+		assert_eq!(state.selected, Some(Id(11)));
+		frame(
+			&ctx,
+			&mut view,
+			&mut state,
+			key(egui::Key::Escape, egui::Modifiers::NONE),
+		);
+		assert!(view.timeline.present_request);
+		view.search.open = true;
+		frame(&ctx, &mut view, &mut state, vec![]);
+		frame(
+			&ctx,
+			&mut view,
+			&mut state,
+			key(egui::Key::Escape, egui::Modifiers::NONE),
+		);
+		assert!(!view.search.open);
+		assert!(!view.timeline.present_request, "the open pane owns Escape");
 	}
 
 	#[test]

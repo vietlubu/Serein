@@ -96,6 +96,41 @@ impl FolderUi {
 		self.key = None;
 	}
 }
+
+impl MessagingUi {
+	/// Home, then servers in rail order with folders flattened; `Some(None)` is Home.
+	pub(super) fn adjacent_server(&self, state: &State, forward: bool) -> Option<Option<Id>> {
+		let folders = state
+			.guild_folders
+			.as_ref()
+			.map(|settings| &settings.folders[..])
+			.unwrap_or_default();
+		// Same placement as `FolderUi::sync_rows`: unfiled servers lead, then folder members.
+		let order: Vec<Option<Id>> = std::iter::once(None)
+			.chain(
+				state
+					.guilds
+					.iter()
+					.filter(|g| !folders.iter().any(|f| f.guild_ids.contains(&g.id)))
+					.map(|g| Some(g.id)),
+			)
+			.chain(
+				folders
+					.iter()
+					.flat_map(|f| f.guild_ids.iter().copied())
+					.filter(|&id| state.guild(id).is_some())
+					.map(Some),
+			)
+			.collect();
+		let current = order.iter().position(|&id| id == self.guild)?;
+		let next = if forward {
+			current.checked_add(1)?
+		} else {
+			current.checked_sub(1)?
+		};
+		order.get(next).copied()
+	}
+}
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Placement {
 	Before,

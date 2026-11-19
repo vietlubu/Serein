@@ -14,7 +14,20 @@ const NAVIGATION: &[KeybindAction] = &[
 	KeybindAction::ShowShortcuts,
 	KeybindAction::SwitchConversation,
 	KeybindAction::SearchConversation,
+	KeybindAction::NavigateBack,
+	KeybindAction::NavigateForward,
+	KeybindAction::PreviousChannel,
+	KeybindAction::NextChannel,
+	KeybindAction::PreviousUnreadChannel,
+	KeybindAction::NextUnreadChannel,
+	KeybindAction::PreviousServer,
+	KeybindAction::NextServer,
 	KeybindAction::CloseOverlay,
+];
+const CHAT: &[KeybindAction] = &[
+	KeybindAction::JumpToPresent,
+	KeybindAction::JumpToOldestUnread,
+	KeybindAction::MarkServerRead,
 ];
 const MESSAGES: &[KeybindAction] = &[
 	KeybindAction::SendMessage,
@@ -48,6 +61,14 @@ pub(super) fn show(
 		"Navigation",
 		"Move around Serein without reaching for the mouse.",
 		NAVIGATION,
+		bindings,
+		capturing,
+	);
+	section(
+		ui,
+		"Chat",
+		"Catch up on the open conversation.",
+		CHAT,
 		bindings,
 		capturing,
 	);
@@ -520,6 +541,123 @@ pub(crate) fn pressed_exact(input: &mut InputState, chord: &KeyChord) -> bool {
 			if *event_key == key && modifier_bits(*modifiers) == chord.modifiers)
 	});
 	matched && input.consume_key(egui_modifiers(chord.modifiers), key)
+}
+
+/// Exact modifiers, so Alt+Up never fires on Alt+Shift+Up.
+fn hit(ctx: &egui::Context, keybinds: &Keybinds, action: KeybindAction) -> bool {
+	ctx.input_mut(|input| {
+		keybinds
+			.chords(action)
+			.any(|chord| pressed_exact(input, chord))
+	})
+}
+
+impl crate::MessagingUi {
+	/// Same gate as the shortcut-list chord: nothing is recording, composing or modal.
+	fn shortcuts_ready(&self, ctx: &egui::Context) -> bool {
+		self.keybind_capture.is_none()
+			&& !self.ime_active
+			&& !self.switcher.is_open()
+			&& !egui::Popup::is_any_open(ctx)
+			&& ctx.memory(|memory| memory.top_modal_layer().is_none() || self.settings.open)
+			&& ctx.input(|input| {
+				input.focused
+					&& !input
+						.events
+						.iter()
+						.any(|event| matches!(event, Event::Ime(_)))
+			})
+	}
+
+	/// Runs before any panel draws so the composer never sees these chords. Returns whether
+	/// the Escape chords may act at the end of the frame, judged before panes close on Escape.
+	pub(super) fn navigation_shortcuts(
+		&mut self,
+		ctx: &egui::Context,
+		state: &mut client_core::State,
+		commands: &mut Vec<client_core::Command>,
+	) -> bool {
+		if !self.shortcuts_ready(ctx) {
+			return false;
+		}
+		for (action, back) in [
+			(KeybindAction::NavigateBack, true),
+			(KeybindAction::NavigateForward, false),
+		] {
+			if hit(ctx, &self.keybinds, action) {
+				self.navigate_history(state, commands, back);
+			}
+		}
+		if self.settings.open || self.server_settings.is_open() || self.channel_menu.is_open() {
+			return false;
+		}
+		for (action, forward, unread) in [
+			(KeybindAction::PreviousChannel, false, false),
+			(KeybindAction::NextChannel, true, false),
+			(KeybindAction::PreviousUnreadChannel, false, true),
+			(KeybindAction::NextUnreadChannel, true, true),
+		] {
+			if hit(ctx, &self.keybinds, action)
+				&& let Some(id) = self.adjacent_channel(state, forward, unread)
+				&& let Some(command) = state.select(id)
+			{
+				commands.push(command);
+			}
+		}
+		for (action, forward) in [
+			(KeybindAction::PreviousServer, false),
+			(KeybindAction::NextServer, true),
+		] {
+			if !hit(ctx, &self.keybinds, action) {
+				continue;
+			}
+			match self.adjacent_server(state, forward) {
+				// Mirrors the rail's server click.
+				Some(Some(id)) => {
+					self.guild = Some(id);
+					commands.extend(state.select_guild(id));
+				}
+				// Mirrors the rail's Home click.
+				Some(None) => {
+					self.guild = None;
+					commands.extend(state.open_messages());
+					self.search.open = false;
+				}
+				None => {}
+			}
+		}
+		if hit(ctx, &self.keybinds, KeybindAction::JumpToOldestUnread) && state.can_jump_unread() {
+			// The unread banner's path; the timeline consumes the flag.
+			self.timeline.unread_jump = true;
+			self.timeline.browse_away();
+			ctx.request_repaint();
+		}
+		true
+	}
+
+	/// Runs last so the composer, search, pickers and cards keep their own Escape.
+	pub(super) fn escape_shortcuts(
+		&mut self,
+		ctx: &egui::Context,
+		state: &mut client_core::State,
+		commands: &mut Vec<client_core::Command>,
+		ready: bool,
+	) {
+		// Drops a request the timeline did not render to consume.
+		self.timeline.present_request = false;
+		if !ready {
+			return;
+		}
+		if hit(ctx, &self.keybinds, KeybindAction::JumpToPresent) {
+			self.timeline.present_request = true;
+			ctx.request_repaint();
+		}
+		if hit(ctx, &self.keybinds, KeybindAction::MarkServerRead)
+			&& let Some(guild) = self.guild
+		{
+			commands.extend(state.prepare_mark_guild_read(guild));
+		}
+	}
 }
 
 /// Removes this frame's presses of `button` when one matches, like `consume_key`.
@@ -1016,7 +1154,7 @@ mod tests {
 				physical_key: None,
 				pressed: true,
 				repeat: false,
-				modifiers: Modifiers::COMMAND,
+				modifiers: Modifiers::NONE,
 			}],
 			&mut bindings,
 			&mut capturing,
@@ -1024,7 +1162,7 @@ mod tests {
 		assert_eq!(capturing, None);
 		assert_eq!(
 			bindings.chord(KeybindAction::PushToTalk),
-			&KeyChord::new("OpenBracket", modifier_bits(Modifiers::COMMAND))
+			&KeyChord::new("OpenBracket", 0)
 		);
 		let parts = chord_parts(bindings.chord(KeybindAction::PushToTalk));
 		assert_eq!(parts.last().map(String::as_str), Some("["));

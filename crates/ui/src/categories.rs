@@ -591,6 +591,50 @@ fn kind_label(kind: u8) -> &'static str {
 }
 
 impl MessagingUi {
+	/// The sidebar row before or after the open conversation, as Discord's Alt+Up/Down walk it.
+	/// `unread` skips rows without unread activity; voice lanes are never targets.
+	pub(super) fn adjacent_channel(
+		&self,
+		state: &State,
+		forward: bool,
+		unread: bool,
+	) -> Option<Id> {
+		let key = self.channel_cache.key?;
+		// Row indices are only valid against the channel list they were built from.
+		if key.generation != state.generation
+			|| key.revision != state.channel_list_revision()
+			|| key.guild != self.guild
+		{
+			return None;
+		}
+		let candidates: Vec<&Channel> = self
+			.channel_cache
+			.rows
+			.iter()
+			.filter_map(|row| match row {
+				CachedRow::Channel(index, Slot::Tree | Slot::Request, _) => {
+					state.channels.get(*index)
+				}
+				_ => None,
+			})
+			.filter(|channel| !voice_lane(channel.kind))
+			.collect();
+		let current = candidates
+			.iter()
+			.position(|channel| Some(channel.id) == state.selected);
+		let eligible = |channel: &&&Channel| {
+			!unread || crate::notifications::row_activity(state, channel, true).0
+		};
+		let found = if forward {
+			let start = current.map_or(0, |index| index + 1);
+			candidates.get(start..)?.iter().find(eligible)
+		} else {
+			let end = current.unwrap_or(candidates.len());
+			candidates[..end].iter().rev().find(eligible)
+		};
+		found.map(|channel| channel.id)
+	}
+
 	/// Draws the conversation or channel sidebar for the current server or Home, with its
 	/// categories, request groups and voice participants, and returns a channel to open.
 	pub(super) fn channel_list(&mut self, ui: &mut egui::Ui, state: &mut State) -> Option<Id> {
