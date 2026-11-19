@@ -2187,6 +2187,28 @@ impl DiscordApi {
 					Err(f) => Event::Failure(f),
 				}
 			}
+			Command::SuppressEmbeds {
+				channel,
+				message,
+				flags,
+			} => {
+				// Documented: only SUPPRESS_EMBEDS changes; a refusal says nothing about channel access.
+				match self
+					.request(
+						Method::PATCH,
+						&format!("/channels/{channel}/messages/{message}"),
+						Some(serde_json::json!({ "flags": flags })),
+					)
+					.await
+					.and_then(|bytes| decode::<PatchDto>(&bytes).map_err(|_| Failure::Ambiguous))
+				{
+					Ok(patch) if patch.id == message && patch.channel_id == channel => {
+						Event::Patch(patch.into_model())
+					}
+					Ok(_) => Event::Failure(Failure::Ambiguous),
+					Err(f) => Event::Failure(f),
+				}
+			}
 			Command::Pin {
 				request,
 				channel,
@@ -3120,6 +3142,62 @@ mod tests {
 			paths.sort();
 			assert!(paths[0].starts_with("/gifs/trending-gifs?limit="));
 			assert!(paths[1].starts_with("/gifs/trending?"));
+		})
+		.await
+		.unwrap();
+	}
+	#[tokio::test]
+	async fn suppress_embeds_patches_flags_and_keeps_access_on_refusal() {
+		use model::Id;
+		tokio::time::timeout(Duration::from_secs(10), async {
+			let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+			let mut api = DiscordApi::new(Arc::new(
+				SessionSecret::from_owner_input("SYNTHETIC_SUPPRESS_TOKEN".into()).unwrap(),
+			))
+			.unwrap();
+			api.base = format!("http://{}", listener.local_addr().unwrap());
+			let server = tokio::spawn(async move {
+				let reply = r#"{"id":"100","channel_id":"20","content":"https://example.com","embeds":[],"flags":1028}"#;
+				for (status, body) in [("200 OK", reply), ("403 Forbidden", "")] {
+					let (mut socket, _) = listener.accept().await.unwrap();
+					let mut request = Vec::new();
+					while !request.windows(12).any(|w| w == br#""flags":1028"#) {
+						let mut bytes = [0; 1024];
+						let n = socket.read(&mut bytes).await.unwrap();
+						assert!(n > 0);
+						request.extend_from_slice(&bytes[..n]);
+						assert!(request.len() < 4096);
+					}
+					let request = std::str::from_utf8(&request).unwrap();
+					assert!(request.starts_with("PATCH /channels/20/messages/100 HTTP/1.1\r\n"));
+					assert!(request.contains(r#"{"flags":1028}"#));
+					socket
+						.write_all(
+							format!(
+								"HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+								body.len()
+							)
+							.as_bytes(),
+						)
+						.await
+						.unwrap();
+				}
+			});
+			let command = || Command::SuppressEmbeds {
+				channel: Id(20),
+				message: Id(100),
+				flags: 1028,
+			};
+			let Event::Patch(patch) = api.execute(command()).await else {
+				panic!("expected a message patch")
+			};
+			assert!(matches!(patch.embeds_suppressed, model::Patch::Value(true)));
+			assert!(matches!(&patch.embeds, model::Patch::Value(e) if e.is_empty()));
+			assert!(matches!(
+				api.execute(command()).await,
+				Event::Failure(Failure::Forbidden)
+			));
+			server.await.unwrap();
 		})
 		.await
 		.unwrap();

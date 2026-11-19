@@ -643,6 +643,7 @@ pub struct MessagingUi {
 	composer_edit: Option<(Id, Id)>,
 	edit_sent: Option<SubmittedEdit>,
 	deleting: Option<(Id, Id)>,
+	suppressing: Option<(Id, Id)>,
 	ime_active: bool,
 	/// A composer picker pick returns focus to the draft next frame, once its click is over.
 	refocus_composer: bool,
@@ -6508,6 +6509,13 @@ impl MessagingUi {
 		{
 			commands.push(command);
 		}
+		if let Some((channel, message, skip)) = self.timeline.suppress_embeds.take() {
+			if !skip {
+				self.suppressing = Some((channel, message));
+			} else if let Some(command) = state.prepare_suppress_embeds(channel, message) {
+				commands.push(command);
+			}
+		}
 		if let Some(channel) = state.pins_changed.take()
 			&& self.search.open
 			&& self.search.pins()
@@ -6903,6 +6911,34 @@ impl MessagingUi {
 					self.deleting = None;
 				}
 				Some(dialog::Choice::Cancelled) => self.deleting = None,
+				None => {}
+			}
+		}
+		if let Some((channel, message)) = self.suppressing {
+			let allowed = state.can_suppress_embeds(channel, message);
+			let mut confirm = dialog::Confirm::new(
+				"suppress-embeds",
+				crate::i18n::translate("embeds-remove-confirm-title"),
+				crate::i18n::translate("embeds-remove-confirm-body"),
+			)
+			.danger()
+			.confirm_label(crate::i18n::translate("embeds-remove-confirm"))
+			.cancel_label(crate::i18n::translate("embeds-remove-cancel"))
+			.enabled(allowed);
+			if !allowed {
+				confirm = confirm.note(
+					dialog::Level::Warning,
+					crate::i18n::translate("embeds-remove-unavailable"),
+				);
+			}
+			match confirm.show(&ctx) {
+				Some(dialog::Choice::Confirmed) => {
+					if let Some(command) = state.prepare_suppress_embeds(channel, message) {
+						commands.push(command);
+					}
+					self.suppressing = None;
+				}
+				Some(dialog::Choice::Cancelled) => self.suppressing = None,
 				None => {}
 			}
 		}

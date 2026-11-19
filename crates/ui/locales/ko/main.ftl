@@ -821,6 +821,14 @@ embeds-gallery-open-image = 이미지 열기…
 embeds-image-preview-image-actions = 이미지 작업
 # Context: link
 embeds-link-open-link = 링크 열기…
+# Context: remove_button
+embeds-remove-embeds = 모든 임베드 제거
+# Context: suppress-embeds dialog
+embeds-remove-confirm-title = 모든 임베드를 제거할까요?
+embeds-remove-confirm-body = 이 메시지의 모든 링크 미리보기를 모든 사람에게서 제거합니다. ✕를 클릭할 때 Shift 키를 누르고 있으면 이 확인을 건너뜁니다.
+embeds-remove-confirm = 모든 임베드 제거
+embeds-remove-cancel = 취소
+embeds-remove-unavailable = 이 메시지의 임베드를 제거할 수 없습니다.
 # Context: show
 embeds-show-additional-embed-content-is-not-supported = 추가 임베드 콘텐츠는 지원하지 않습니다
 # Context: poll_result

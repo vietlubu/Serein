@@ -4882,6 +4882,30 @@ impl Desktop {
 					pinned,
 					result: Ok(()),
 				},
+				Command::SuppressEmbeds {
+					channel,
+					message,
+					flags,
+				} => {
+					use model::Patch;
+					Event::Patch(model::MessagePatch {
+						poll: Patch::Absent,
+						sticker_items: Patch::Absent,
+						flags: Patch::Value(flags),
+						components: Patch::Absent,
+						application_id: Patch::Absent,
+						extra_content: Default::default(),
+						reactions: Patch::Absent,
+						id: message,
+						channel,
+						content: Patch::Absent,
+						mentions: Patch::Absent,
+						edited: Patch::Absent,
+						embeds: Patch::Absent,
+						embeds_suppressed: Patch::Value(true),
+						attachments: Patch::Absent,
+					})
+				}
 			};
 			self.state.apply(Envelope {
 				generation: self.state.generation,

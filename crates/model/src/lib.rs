@@ -445,7 +445,7 @@ pub const HAS_THREAD: u64 = 1 << 5;
 pub struct Message {
 	pub poll: Option<Box<polls::Poll>>,
 	pub sticker_items: Vec<Sticker>,
-	/// Original outer message flags, retained for interaction submissions.
+	/// Original outer message flags, retained for interaction submissions and embed suppression.
 	pub flags: u64,
 	pub ephemeral: bool,
 	pub components: Vec<Component>,

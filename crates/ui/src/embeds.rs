@@ -533,6 +533,22 @@ fn image_preview(
 	}
 }
 
+/// Discord's remove control beside a preview's top-right corner; stays on-screen in narrow rows.
+fn remove_button(ui: &mut egui::Ui, card: egui::Rect) -> bool {
+	const SIZE: f32 = 20.0;
+	let left = (card.right() + 4.0).min(ui.max_rect().right() - SIZE);
+	let rect = egui::Rect::from_min_size(egui::pos2(left, card.top()), egui::vec2(SIZE, SIZE));
+	// A detached child keeps the parent's cursor below the card.
+	let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect));
+	crate::icons::button(
+		&mut child,
+		crate::icons::Icon::Close,
+		SIZE,
+		"embeds-remove-embeds",
+	)
+	.clicked()
+}
+
 /// The clip of a poster-less video card, drawn where Discord draws its player.
 fn clip_preview(ui: &mut egui::Ui, clip: &model::EmbedMedia, images: &mut Avatars, demo: bool) {
 	images.show_media(
@@ -559,6 +575,7 @@ pub fn show(
 	state: &client_core::State,
 	card_surface: crate::design::MessageCardSurface,
 	hide_media_links: bool,
+	mut remove: Option<&mut bool>,
 ) -> Option<Gif> {
 	if message.embeds_suppressed {
 		return None;
@@ -585,7 +602,7 @@ pub fn show(
 			cache,
 			!hide_media_links || !standalone_media_links(message),
 		);
-		ui.push_id(("embed", index), |ui| {
+		let card = ui.push_id(("embed", index), |ui| {
 			if count > 1 && inline_image(embed).is_some() {
 				gallery(ui, group, images, message.id, download, demo);
 				if let Some(url) = &source_url {
@@ -937,6 +954,11 @@ pub fn show(
 			);
 			ui.add_space(6.0);
 		});
+		if let Some(remove) = remove.as_deref_mut()
+			&& remove_button(ui, card.response.rect)
+		{
+			*remove = true;
+		}
 		index += count;
 	}
 	favorite_action
@@ -1052,6 +1074,7 @@ mod tests {
 					&client_core::State::default(),
 					crate::design::MessageCardSurface::Conversation,
 					false,
+					None,
 				);
 			})
 			.drop_without_applying_deltas();
@@ -1202,6 +1225,7 @@ mod tests {
 								&client_core::State::default(),
 								crate::design::MessageCardSurface::Conversation,
 								false,
+								None,
 							);
 						},
 					)
@@ -1293,6 +1317,7 @@ mod tests {
 									&client_core::State::default(),
 									crate::design::MessageCardSurface::Conversation,
 									hide_media_links,
+									None,
 								)
 								.is_none()
 							);
