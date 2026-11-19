@@ -5409,6 +5409,7 @@ impl Desktop {
 			}
 		}
 		let mut persist_timeline = false;
+		let mut read_changed = false;
 		let mut full_window = false;
 		let mut changed_messages = std::collections::BTreeSet::new();
 		for mut event in events {
@@ -5483,41 +5484,16 @@ impl Desktop {
 					_ => full_window = true,
 				}
 			}
-			let guild_ack = match &event.event {
-				Event::ReadState(client_core::read_state::Event::GuildAck {
-					guild,
-					request,
-					result: Ok(()),
-				}) => self.state.pending_guild_ack(*guild, *request),
-				Event::ReadState(client_core::read_state::Event::AllAck {
-					request,
-					result: Ok(()),
-					..
-				}) => self.state.pending_all_ack(*request),
-				_ => false,
-			};
 			if event.generation == self.state.generation
 				&& (invalidate
 					|| event.event.changes_access()
-					|| guild_ack || matches!(
-					&event.event,
-					Event::NotificationPreferences(_)
-						| Event::ChannelAction(_)
-						| Event::UserAction(_)
-						| Event::Disconnected
-				)
-					// Reads elsewhere (e.g. auto-acks of the open channel) must not close another channel's alert.
 					|| matches!(
-					&event.event,
-					Event::ReadState(
-						client_core::read_state::Event::Ack { channel, .. }
-							| client_core::read_state::Event::Result {
-								channel,
-								result: Ok(()),
-								..
-							}
-					) if self.notifications.channel() == Some(*channel)
-				)) {
+						&event.event,
+						Event::NotificationPreferences(_)
+							| Event::ChannelAction(_)
+							| Event::UserAction(_)
+							| Event::Disconnected
+					)) {
 				self.notifications.dismiss();
 			}
 			let data_changes = extension_data_events::Changes::capture(&self.state, &event);
@@ -5535,6 +5511,7 @@ impl Desktop {
 				self.extensions.access_changed(&mut self.messaging);
 			}
 			log_session_event(&event.event);
+			read_changed |= ready || matches!(event.event, Event::ReadState(_));
 			self.state.apply(event);
 			if let Some(message) = takeover_notice {
 				self.messaging
@@ -5648,6 +5625,15 @@ impl Desktop {
 				let command = self.state.history(None);
 				self.command(command);
 			}
+		}
+		if read_changed {
+			let state = &self.state;
+			self.notifications.close_read(|channel, message| {
+				state
+					.read_marker(channel)
+					.flatten()
+					.is_some_and(|read| read >= message)
+			});
 		}
 		if persist_timeline
 			&& self.state.freshness == model::Freshness::Fresh
@@ -6359,6 +6345,7 @@ impl eframe::App for Desktop {
 			match alert {
 				notification_runtime::Alert::Message {
 					channel,
+					message,
 					title,
 					body,
 					avatar_key,
@@ -6366,7 +6353,7 @@ impl eframe::App for Desktop {
 				} => {
 					if self
 						.notifications
-						.notify_channel(channel, title, body, image_path)
+						.notify_channel(channel, message, title, body, image_path)
 						&& let Some(worker) = &self.avatars
 					{
 						worker.request(avatar_key);
