@@ -100,6 +100,7 @@ pub struct Notifications {
 	status: Arc<AtomicU64>,
 	wake: Arc<dyn Fn() + Send + Sync>,
 	restore: Arc<dyn Fn() + Send + Sync>,
+	channel: std::cell::Cell<Option<model::Id>>,
 }
 
 impl Notifications {
@@ -118,6 +119,7 @@ impl Notifications {
 			status: Arc::new(AtomicU64::new(0)),
 			wake: Arc::new(wake),
 			restore: Arc::new(restore),
+			channel: std::cell::Cell::new(None),
 		}
 	}
 
@@ -210,6 +212,10 @@ impl Notifications {
 	) -> bool {
 		self.message(Some(channel), title, body, image_path)
 	}
+	/// Channel of the latest queued alert; the worker shows only the newest one.
+	pub fn channel(&self) -> Option<model::Id> {
+		self.channel.get()
+	}
 	pub fn take_activation(&self) -> Option<model::Id> {
 		let current = self.generation.load(Ordering::Acquire);
 		self.activated.try_iter().find_map(|(generation, channel)| {
@@ -254,7 +260,10 @@ impl Notifications {
 			channel,
 			alert: Some(alert),
 		}) {
-			Ok(()) => true,
+			Ok(()) => {
+				self.channel.set(channel);
+				true
+			}
 			Err(error) => {
 				let status = match error {
 					mpsc::TrySendError::Full(_) => Status::QueueFull,

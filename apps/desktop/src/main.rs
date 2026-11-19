@@ -5586,11 +5586,18 @@ impl Desktop {
 						| Event::ChannelAction(_)
 						| Event::UserAction(_)
 						| Event::Disconnected
-						| Event::ReadState(client_core::read_state::Event::Ack { .. })
-						| Event::ReadState(client_core::read_state::Event::Result {
-							result: Ok(()),
-							..
-						})
+				)
+					// Reads elsewhere (e.g. auto-acks of the open channel) must not close another channel's alert.
+					|| matches!(
+					&event.event,
+					Event::ReadState(
+						client_core::read_state::Event::Ack { channel, .. }
+							| client_core::read_state::Event::Result {
+								channel,
+								result: Ok(()),
+								..
+							}
+					) if self.notifications.channel() == Some(*channel)
 				)) {
 				self.notifications.dismiss();
 			}
