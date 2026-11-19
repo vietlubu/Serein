@@ -160,6 +160,7 @@ mod tests {
 					scroll_speed_percent: 100,
 					hide_media_links: true,
 					confirm_external_links: true,
+					thread_pane_width: 400,
 				}))
 				.is_none()
 		);

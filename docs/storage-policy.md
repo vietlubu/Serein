@@ -714,8 +714,10 @@ reopen the upgraded cache. No unpublished reply-navigation metadata is included.
 Reading/layout settings use one application-wide SQLite singleton: integer display
 scale 50..150 percent, sidebar width 190..360 logical points, wide-layout People visibility,
 GIF animation, media-link hiding, external-link confirmation and smooth scrolling, plus
-scrolling speed (25–300 percent, default 100). Schema 24 adds the checked speed column
-transactionally; existing settings keep their prior speed.
+scrolling speed (25–300 percent, default 100) and thread peek pane width (320–720 logical
+points, default 400). Schema 24 adds the checked speed column transactionally; existing
+settings keep their prior speed. The checked thread-pane column is added the same way when
+missing. A narrow window can constrain the pane without changing the stored width.
 Missing row means 100 percent / 236 points with People, media-link hiding, link confirmation and
 smooth scrolling enabled while GIF animation is disabled. Reset removes just this override in an
 atomic statement; neither theme nor account drafts/history are reset. Logout retains these

@@ -623,6 +623,12 @@ impl LocalStore {
 		if !has_double_click_enabled {
 			transaction.execute_batch("ALTER TABLE reading_preferences ADD COLUMN double_click_reaction_enabled INTEGER NOT NULL DEFAULT 0 CHECK(typeof(double_click_reaction_enabled)='integer' AND double_click_reaction_enabled IN (0,1));")?;
 		}
+		let has_thread_pane_width: bool = transaction.query_row(
+			"SELECT EXISTS(SELECT 1 FROM pragma_table_info('reading_preferences') WHERE name='thread_pane_width')", [], |row| row.get(0),
+		)?;
+		if !has_thread_pane_width {
+			transaction.execute_batch("ALTER TABLE reading_preferences ADD COLUMN thread_pane_width INTEGER NOT NULL DEFAULT 400 CHECK(typeof(thread_pane_width)='integer' AND thread_pane_width BETWEEN 320 AND 720);")?;
+		}
 		let has_author_roles: bool = transaction.query_row(
 			"SELECT EXISTS(SELECT 1 FROM pragma_table_info('messages') WHERE name='author_roles')",
 			[],
@@ -772,7 +778,7 @@ impl LocalStore {
 		let stored = self
 			.0
 			.query_row(
-				"SELECT zoom_percent,sidebar_width,show_members,animate_gifs,hide_media_links,confirm_external_links,smooth_scrolling,scroll_speed_percent,show_members_dms,compact_messages,double_click_reaction,double_click_reaction_enabled FROM reading_preferences WHERE singleton=1",
+				"SELECT zoom_percent,sidebar_width,show_members,animate_gifs,hide_media_links,confirm_external_links,smooth_scrolling,scroll_speed_percent,show_members_dms,compact_messages,double_click_reaction,double_click_reaction_enabled,thread_pane_width FROM reading_preferences WHERE singleton=1",
 				[],
 				|row| {
 					Ok(match (
@@ -788,6 +794,7 @@ impl LocalStore {
 						row.get_ref(9)?,
 						row.get_ref(10)?,
 						row.get_ref(11)?,
+						row.get_ref(12)?,
 					) {
 						(
 							ValueRef::Integer(zoom @ 50..=150),
@@ -802,6 +809,7 @@ impl LocalStore {
 							ValueRef::Integer(compact_messages @ 0..=1),
 							ValueRef::Integer(double_click_reaction @ 0..=5),
 							ValueRef::Integer(double_click_enabled @ 0..=1),
+							ValueRef::Integer(thread_pane @ 320..=720),
 						) => Some(ReadingPreferences {
 							zoom_percent: zoom as u16,
 							sidebar_width: width as u16,
@@ -815,6 +823,7 @@ impl LocalStore {
 							confirm_external_links: confirm_external_links == 1,
 							smooth_scrolling: smooth_scrolling == 1,
 							scroll_speed_percent: scroll_speed_percent as u16,
+							thread_pane_width: thread_pane as u16,
 						}),
 						_ => None,
 					})
@@ -836,10 +845,10 @@ impl LocalStore {
 			self.0
 				.execute("DELETE FROM reading_preferences WHERE singleton=1", [])?;
 		} else {
-			self.0.execute("INSERT INTO reading_preferences(singleton,zoom_percent,sidebar_width,show_members,animate_gifs,hide_media_links,confirm_external_links,smooth_scrolling,scroll_speed_percent,show_members_dms,compact_messages,double_click_reaction,double_click_reaction_enabled)
-				VALUES(1,?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12) ON CONFLICT(singleton) DO UPDATE SET
-				zoom_percent=excluded.zoom_percent,sidebar_width=excluded.sidebar_width,show_members=excluded.show_members,animate_gifs=excluded.animate_gifs,hide_media_links=excluded.hide_media_links,confirm_external_links=excluded.confirm_external_links,smooth_scrolling=excluded.smooth_scrolling,scroll_speed_percent=excluded.scroll_speed_percent,show_members_dms=excluded.show_members_dms,compact_messages=excluded.compact_messages,double_click_reaction=excluded.double_click_reaction,double_click_reaction_enabled=excluded.double_click_reaction_enabled",
-				params![preferences.zoom_percent, preferences.sidebar_width, preferences.show_members, preferences.animate_gifs, preferences.hide_media_links, preferences.confirm_external_links, preferences.smooth_scrolling, preferences.scroll_speed_percent, preferences.show_members_dms, preferences.compact_messages, preferences.double_click_reaction, preferences.double_click_reaction_enabled])?;
+			self.0.execute("INSERT INTO reading_preferences(singleton,zoom_percent,sidebar_width,show_members,animate_gifs,hide_media_links,confirm_external_links,smooth_scrolling,scroll_speed_percent,show_members_dms,compact_messages,double_click_reaction,double_click_reaction_enabled,thread_pane_width)
+				VALUES(1,?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13) ON CONFLICT(singleton) DO UPDATE SET
+				zoom_percent=excluded.zoom_percent,sidebar_width=excluded.sidebar_width,show_members=excluded.show_members,animate_gifs=excluded.animate_gifs,hide_media_links=excluded.hide_media_links,confirm_external_links=excluded.confirm_external_links,smooth_scrolling=excluded.smooth_scrolling,scroll_speed_percent=excluded.scroll_speed_percent,show_members_dms=excluded.show_members_dms,compact_messages=excluded.compact_messages,double_click_reaction=excluded.double_click_reaction,double_click_reaction_enabled=excluded.double_click_reaction_enabled,thread_pane_width=excluded.thread_pane_width",
+				params![preferences.zoom_percent, preferences.sidebar_width, preferences.show_members, preferences.animate_gifs, preferences.hide_media_links, preferences.confirm_external_links, preferences.smooth_scrolling, preferences.scroll_speed_percent, preferences.show_members_dms, preferences.compact_messages, preferences.double_click_reaction, preferences.double_click_reaction_enabled, preferences.thread_pane_width])?;
 		}
 		Ok(())
 	}
@@ -2490,6 +2499,7 @@ mod tests {
 			scroll_speed_percent: 100,
 			hide_media_links: true,
 			confirm_external_links: true,
+			thread_pane_width: 400,
 		};
 		for (name, legacy, expected_kind, expected_markers, expected_preferences) in [
 			(
@@ -2818,6 +2828,7 @@ mod tests {
 			scroll_speed_percent: 100,
 			hide_media_links: true,
 			confirm_external_links: true,
+			thread_pane_width: 400,
 		};
 		store.save_reading_preferences(preferences).unwrap();
 		drop(store);
@@ -2840,6 +2851,7 @@ mod tests {
 				scroll_speed_percent: 100,
 				hide_media_links: true,
 				confirm_external_links: true,
+				thread_pane_width: 400,
 			},
 		] {
 			assert_eq!(
@@ -2957,6 +2969,27 @@ mod tests {
 			let store = LocalStore::initialize(store.0).unwrap();
 			assert_eq!(store.reading_preferences().unwrap(), preferences);
 		}
+
+		{
+			let store = LocalStore::initialize(Connection::open_in_memory().unwrap()).unwrap();
+			store
+				.save_reading_preferences(ReadingPreferences {
+					thread_pane_width: 560,
+					..Default::default()
+				})
+				.unwrap();
+			store
+				.0
+				.execute_batch("ALTER TABLE reading_preferences DROP COLUMN thread_pane_width;")
+				.unwrap();
+			let store = LocalStore::initialize(store.0).unwrap();
+			let mut preferences = store.reading_preferences().unwrap();
+			assert_eq!(preferences.thread_pane_width, 400);
+			preferences.thread_pane_width = 560;
+			store.save_reading_preferences(preferences).unwrap();
+			let store = LocalStore::initialize(store.0).unwrap();
+			assert_eq!(store.reading_preferences().unwrap(), preferences);
+		}
 	}
 
 	#[test]
@@ -3003,6 +3036,7 @@ mod tests {
 			animate_gifs: true,
 			hide_media_links: false,
 			confirm_external_links: false,
+			thread_pane_width: 400,
 			smooth_scrolling: false,
 			compact_messages: true,
 			double_click_reaction_enabled: false,
@@ -3082,6 +3116,7 @@ mod tests {
 					scroll_speed_percent: 100,
 					hide_media_links: true,
 					confirm_external_links: true,
+					thread_pane_width: 400,
 				};
 				store.save_reading_preferences(preferences).unwrap();
 				assert_eq!(store.reading_preferences().unwrap(), preferences);
@@ -3111,6 +3146,7 @@ mod tests {
 					scroll_speed_percent: 100,
 					hide_media_links: true,
 					confirm_external_links: true,
+					thread_pane_width: 400,
 				}),
 				Err(StoreError::Capacity)
 			);
@@ -3131,6 +3167,7 @@ mod tests {
 				scroll_speed_percent: 100,
 				hide_media_links: true,
 				confirm_external_links: true,
+				thread_pane_width: 400,
 			}),
 			Err(StoreError::Unavailable)
 		);

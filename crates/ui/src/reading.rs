@@ -10,6 +10,7 @@ impl MessagingUi {
 		self.reading_preferences = value;
 		self.avatars.set_animation(value.animate_gifs);
 		self.reading_sidebar_applied = None;
+		self.thread_pane_applied = None;
 		let zoom = f32::from(value.zoom_percent) / 100.0;
 		if (ctx.zoom_factor() - zoom).abs() > 0.001 {
 			// egui applies zoom after this pass, not synchronously inside the settings menu.
@@ -108,6 +109,7 @@ impl MessagingUi {
 			let defaults = ReadingPreferences::default();
 			value.zoom_percent = defaults.zoom_percent;
 			value.sidebar_width = defaults.sidebar_width;
+			value.thread_pane_width = defaults.thread_pane_width;
 			value.show_members = defaults.show_members;
 			value.show_members_dms = defaults.show_members_dms;
 			self.reading_save_requested = true;
@@ -301,6 +303,31 @@ impl MessagingUi {
 			self.reading_sidebar_applied = Some(self.reading_preferences.sidebar_width);
 		}
 	}
+
+	/// The thread pane keeps at least 360 px for the conversation beside it.
+	pub(super) fn prepare_thread_pane(&mut self, ui: &egui::Ui) -> f32 {
+		let maximum = (ui.available_width() - 360.0).clamp(320.0, 720.0);
+		let width = self.reading_preferences.thread_pane_width;
+		let constrained = f32::from(width) > maximum;
+		if self.thread_pane_applied != Some(width) || self.thread_pane_constrained != constrained {
+			ui.ctx()
+				.data_mut(|data| data.remove::<PanelState>(ui.scope_id().with("thread-pane")));
+			self.thread_pane_applied = Some(width);
+		}
+		self.thread_pane_constrained = constrained;
+		maximum
+	}
+
+	pub(super) fn record_thread_pane(&mut self, width: f32) {
+		if !self.thread_pane_constrained
+			&& self.thread_pane_applied == Some(self.reading_preferences.thread_pane_width)
+			&& width.is_finite()
+			&& (320.0..=720.0).contains(&width.round())
+		{
+			self.reading_preferences.thread_pane_width = width.round() as u16;
+			self.thread_pane_applied = Some(self.reading_preferences.thread_pane_width);
+		}
+	}
 }
 
 #[cfg(test)]
@@ -366,6 +393,7 @@ mod tests {
 			scroll_speed_percent: 100,
 			hide_media_links: true,
 			confirm_external_links: true,
+			thread_pane_width: 400,
 		};
 		view.apply_reading_preferences(&ctx, custom);
 		for _ in 0..3 {
