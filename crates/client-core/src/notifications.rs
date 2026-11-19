@@ -12,7 +12,7 @@ const MAX_SETTINGS_BYTES: usize = 32 * 1024 * 1024;
 pub struct Notification {
 	pub channel: Id,
 	pub message: Id,
-	pub sender: String,
+	pub title: String,
 	pub preview: String,
 	pub avatar_key: String,
 	/// The account owner is mentioned by ID; notification admission matches on it.
@@ -30,7 +30,7 @@ impl Notification {
 	fn bytes(&self) -> usize {
 		size_of::<Self>()
 			+ self.roles.capacity() * size_of::<Id>()
-			+ self.sender.capacity()
+			+ self.title.capacity()
 			+ self.preview.capacity()
 			+ self.avatar_key.capacity()
 	}
@@ -1156,6 +1156,36 @@ impl State {
 		} else {
 			sender
 		};
+		let place = self
+			.channel(message.channel)
+			.and_then(|channel| {
+				let name = |text: &str| alert_text(text, 80, 256);
+				match channel.kind {
+					3 => Some(name(self.conversation_name(channel))),
+					_ if channel.guild.is_some() => {
+						let own = name(&channel.name);
+						let parent = channel
+							.parent_id
+							.and_then(|id| self.channel(id))
+							.map(|parent| match parent.kind {
+								4 => name(&parent.name),
+								_ => format!("#{}", name(&parent.name)),
+							})
+							.filter(|parent| !parent.is_empty() && parent != "#");
+						(!own.is_empty()).then(|| match parent {
+							Some(parent) => format!("#{own}, {parent}"),
+							None => format!("#{own}"),
+						})
+					}
+					// 1:1 DM: author alone, matching Discord.
+					_ => None,
+				}
+			})
+			.filter(|place| !place.is_empty());
+		let title = match place {
+			Some(place) => format!("{sender} ({place})"),
+			None => sender,
+		};
 		let display = message.display_text();
 		let preview = if display.trim().is_empty() {
 			if !message.attachments.is_empty() {
@@ -1176,7 +1206,7 @@ impl State {
 		let notification = Notification {
 			channel: message.channel,
 			message: message.id,
-			sender,
+			title,
 			preview,
 			avatar_key: message.author.avatar_key(),
 			direct,
@@ -1361,7 +1391,8 @@ mod tests {
 				})
 				.unwrap();
 			state.observe_notification(&incoming);
-			assert!(state.take_notification().is_some());
+			let alert = state.take_notification().expect("dm alert");
+			assert!(!alert.title.contains('('));
 			let mute = state.set_dm_muted(Id(20), true).unwrap();
 			assert_eq!(state.dm_muted(Id(20)), Some(true));
 			assert!(!state.notification_allowed(Id(20)));
@@ -1397,9 +1428,13 @@ mod tests {
 			incoming.author.name = "A sender\nname".into();
 			incoming.author.avatar = Some("0123456789abcdef0123456789abcdef".into());
 			incoming.content = "Hello\nfrom the call 🌍".repeat(100);
+			state.channels[1].kind = 4;
+			state.channels[1].name = "Text\nChannels".into();
+			state.channels[0].name = "ping pong".into();
+			state.channels[0].parent_id = Some(Id(21));
 			state.observe_notification(&incoming);
 			let alert = state.take_notification().expect("admitted incoming alert");
-			assert_eq!(alert.sender, "A sender name");
+			assert_eq!(alert.title, "A sender name (#ping pong, Text Channels)");
 			assert!(alert.preview.starts_with("Hello from the call 🌍"));
 			assert!(alert.preview.len() <= 512);
 			assert_eq!(alert.avatar_key, incoming.author.avatar_key());

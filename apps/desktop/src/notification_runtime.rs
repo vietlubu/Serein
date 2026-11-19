@@ -260,7 +260,7 @@ impl Runtime {
 				});
 				alert = Some(Alert::Message {
 					channel: notification.channel,
-					title: notification.sender,
+					title: notification.title,
 					body: notification.preview,
 					avatar_key: notification.avatar_key,
 					image_path,
