@@ -1,10 +1,11 @@
-//! The latest message of a thread, read once for the card under its starter message.
+//! The latest message of a thread, shown in the card under its starter message.
 //!
-//! The gateway's channel list carries a thread's name and message count but no message body, so
-//! the card's last-message line needs one bounded read. Admission mirrors a hover preload: one
-//! answer in flight, a per-minute cap, a small cache whose entries are trusted for a few minutes,
-//! and a thread whose read failed is not retried until that trust would have expired. Nothing
-//! here joins, subscribes, marks read or sends.
+//! A thread sync may carry each thread's newest message (unofficial), which seeds the card
+//! directly. Otherwise the gateway's channel list carries a thread's name and message count but
+//! no message body, so the card's last-message line needs one bounded read. Admission mirrors a
+//! hover preload: one answer in flight, a per-minute cap, a bounded cache whose entries are
+//! trusted for a few minutes, and a thread whose read failed is not retried until that trust
+//! would have expired. Nothing here joins, subscribes, marks read or sends.
 use crate::{Command, State, auth::AuthState, auth::Failure};
 use model::{Channel, Id, Message};
 use std::{
@@ -12,12 +13,12 @@ use std::{
 	time::{Duration, Instant},
 };
 
-/// Cards a session keeps a preview for; the least recently read goes first.
-const MAX_PREVIEWS: usize = 24;
+/// Cards a session keeps a preview for; the least recently stored goes first.
+const MAX_PREVIEWS: usize = 512;
 /// One answer: the latest message plus, for a thread this session had not loaded, its channel.
 const MAX_PREVIEW_BYTES: usize = 64 * 1024;
 /// All previews together stay below this.
-const MAX_BYTES: usize = 192 * 1024;
+const MAX_BYTES: usize = 2 * 1024 * 1024;
 /// A cached preview is trusted this long, then refreshed when its card is on screen again.
 const TRUST_AGE: Duration = Duration::from_secs(5 * 60);
 /// Reads per minute, matching the hover-preload budget.
@@ -300,6 +301,34 @@ impl State {
 			}
 		}
 	}
+	/// Seeds cards from a thread sync. Each message is its thread's newest, so no read is needed;
+	/// a thread the session already knows a newer message for keeps reading as before.
+	pub(crate) fn seed_thread_previews(&mut self, messages: Vec<Message>) {
+		let now = Instant::now();
+		let mut seeded = false;
+		for message in messages {
+			let thread = message.channel;
+			let latest = Some(message.id);
+			if self
+				.channel(thread)
+				.and_then(|channel| channel.last_message)
+				!= latest
+			{
+				continue;
+			}
+			let loaded = Loaded {
+				channel: None,
+				last: Some(message),
+			};
+			if loaded.valid(thread) {
+				self.thread_previews.store(thread, loaded, latest, now);
+				seeded = true;
+			}
+		}
+		if seeded {
+			self.revision += 1;
+		}
+	}
 }
 
 #[cfg(test)]
@@ -423,13 +452,39 @@ mod tests {
 		assert!(!state.thread_preview_needs_read(other));
 
 		// The cache keeps only a bounded number of cards.
-		for id in 100..200 {
+		for id in 100..100 + MAX_PREVIEWS as u64 {
 			state
 				.thread_previews
 				.store(Id(id), answer(Id(id), Id(id + 1)), None, Instant::now());
 		}
 		assert_eq!(state.thread_previews.entries.len(), MAX_PREVIEWS);
 		assert!(state.thread_preview(other).is_none());
+	}
+
+	#[test]
+	fn a_sync_seeds_only_cards_whose_latest_message_it_carried() {
+		let mut state = State::default();
+		let mut a = channel(Id(50), 11, Some(Id(1)));
+		a.last_message = Some(Id(81));
+		let mut b = channel(Id(60), 11, Some(Id(1)));
+		b.last_message = Some(Id(91));
+		state.channels = vec![a, b];
+		state.seed_thread_previews(vec![
+			message(Id(81), Id(50)),
+			message(Id(90), Id(60)),
+			message(Id(5), Id(70)),
+		]);
+		let preview = state
+			.thread_preview(Id(50))
+			.expect("the sync fills the card");
+		assert_eq!(preview.last.map(|message| message.id), Some(Id(81)));
+		assert!(!state.thread_preview_needs_read(Id(50)));
+		assert!(state.thread_preview(Id(60)).is_none());
+		assert!(
+			state.thread_preview_needs_read(Id(60)),
+			"an older message leaves the card to its read"
+		);
+		assert!(state.thread_preview(Id(70)).is_none());
 	}
 
 	#[test]

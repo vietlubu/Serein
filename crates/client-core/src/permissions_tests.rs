@@ -282,6 +282,7 @@ fn large_startup_retains_permissions_read_state_and_subsequent_channel_threads()
 				parents: Some(vec![Id(999_000)]),
 				threads: vec![thread],
 				removed: vec![],
+				previews: vec![],
 			},
 		);
 		assert_eq!(state.channels.len(), 20_002);
@@ -1419,6 +1420,7 @@ fn deleting_an_unassigned_role_prunes_its_overwrites_and_invalidates_cached_deci
 						parents: None,
 						threads: vec![replacement],
 						removed: vec![],
+						previews: vec![],
 					},
 				};
 				apply(&mut state, event);

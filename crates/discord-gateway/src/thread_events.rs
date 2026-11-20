@@ -105,6 +105,7 @@ pub(super) fn decode_events(
 					parents: sync.parents,
 					threads: sync.threads,
 					removed: sync.removed,
+					previews: sync.previews,
 				}),
 				info(sync.guild, sync.changes),
 			)

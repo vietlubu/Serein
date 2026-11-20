@@ -711,6 +711,7 @@ mod tests {
 				&mut state,
 				Event::ThreadsSync {
 					removed: vec![],
+					previews: vec![],
 					guild: Id(1),
 					parents: None,
 					threads: vec![],
@@ -736,6 +737,7 @@ mod tests {
 					if adopt_with_snapshot {
 						Event::ThreadsSync {
 							removed: vec![],
+							previews: vec![],
 							guild: Id(1),
 							parents: None,
 							threads: vec![channel(100, Some(Id(10)), 11)],

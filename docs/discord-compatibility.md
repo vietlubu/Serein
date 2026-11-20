@@ -3192,6 +3192,19 @@ button are gone, and a refused read leaves the card with whatever the channel li
 carries. Synthetic tests cover admission, the bounded cache, the rejected answer, the refresh on
 a newer known message, and the card's rendered name, count, author and reply.
 
+## Thread card previews from the thread sync — November 18, 2026
+
+Unofficial evidence: an owner-supplied HAR of the official client (November 2026) shows it
+subscribing to a server with op 37 `"threads": true`, after which one `THREAD_LIST_SYNC` arrives
+carrying `threads` (555 rows, each with `last_message_id`) and `most_recent_messages` (166 full
+message objects). Serein now subscribes the same way and parses `most_recent_messages`, keeping
+only a message whose id equals its listed, non-hidden thread's `last_message_id`, at most one per
+thread and 2 MiB per sync; a malformed row is dropped without rejecting the snapshot. Those
+messages seed the card cache in the same event, so their cards render without a REST read. The
+cache now holds 512 cards within 2 MiB. Cards the sync did not cover keep the bounded REST read
+described above. Synthetic tests cover the filter and the seeding; acceptance on a normal account
+is live-unverified.
+
 ## Frequently used emoji from frecency settings — November 6, 2026
 
 The emoji pickers' frequently used rows follow the account's synced rankings, as the official

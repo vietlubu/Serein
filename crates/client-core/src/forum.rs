@@ -954,7 +954,7 @@ mod tests {
 			assert!(state.request_forum_posts(Id(20), false).is_none());
 			// A thread snapshot replaces this scope, so the fetched page must be taken again.
 			state
-				.apply_threads_sync(Id(1), Some(vec![Id(20)]), vec![], vec![])
+				.apply_threads_sync(Id(1), Some(vec![Id(20)]), vec![], vec![], vec![])
 				.unwrap();
 			assert!(state.posts.error.is_none() && state.posts.loaded == 0);
 			assert!(matches!(

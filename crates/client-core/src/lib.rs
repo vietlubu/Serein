@@ -651,6 +651,8 @@ pub enum Event {
 		parents: Option<Vec<Id>>,
 		threads: Vec<Channel>,
 		removed: Vec<Id>,
+		/// Newest messages of listed threads, carried by the sync (unofficial).
+		previews: Vec<Message>,
 	},
 	/// Membership or archive metadata of known threads.
 	ThreadInfo {
@@ -3201,7 +3203,8 @@ impl State {
 				parents,
 				threads,
 				removed,
-			} => self.apply_threads_sync(guild, parents, threads, removed),
+				previews,
+			} => self.apply_threads_sync(guild, parents, threads, removed, previews),
 			Event::ThreadInfo { guild, changes } => {
 				self.apply_thread_changes(Some(guild), changes);
 				Ok(())
@@ -4771,6 +4774,7 @@ impl Event {
 					parents,
 					threads,
 					removed,
+					previews,
 					..
 				} => {
 					removed.capacity() * size_of::<Id>()
@@ -4779,6 +4783,8 @@ impl Event {
 							.map_or(0, |p| p.capacity() * size_of::<Id>())
 						+ threads.capacity().saturating_sub(threads.len()) * size_of::<Channel>()
 						+ threads.iter().map(Channel::bytes).sum::<usize>()
+						+ previews.capacity() * size_of::<Message>()
+						+ previews.iter().map(Message::bytes).sum::<usize>()
 				}
 				Self::ChannelChanged(patch) | Self::ThreadChanged { patch, .. } => {
 					[&patch.name, &patch.icon]
