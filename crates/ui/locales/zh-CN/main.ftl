@@ -3876,23 +3876,13 @@ theme-editor-toolbar-working = 处理中…
 
 ## crates/ui/src/thread_create.rs
 # Context: show
-thread-create-show-cancel = 取消
-# Context: show
-thread-create-show-create = 创建
-# Context: show
-thread-create-show-create-thread = 创建帖子
+thread-create-new-thread = 新帖子
 # Context: show
 thread-create-show-enter-a-message-to-start-the-conversation = 输入消息，开始对话吧！
-# Context: show
-thread-create-show-everyone-who-can-see-this-channel-can-see-the-thread = 看得到此频道的人，都看得到此帖子。
-# Context: show
-thread-create-show-message = 消息
 # Context: show
 thread-create-show-private-hint = 仅你邀请的人和版主可见
 # Context: show
 thread-create-show-private-thread = 私密帖子
-# Context: show
-thread-create-show-the-selected-message-starts-the-thread-everyone-who-can-see = 以所选消息作为帖子开头。看得到此频道的人，都看得到此帖子。
 # Context: show
 thread-create-show-thread-name = 帖子名称
 

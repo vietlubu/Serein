@@ -3845,23 +3845,13 @@ theme-editor-toolbar-working = Lavorando…
 
 ## crates/ui/src/thread_create.rs
 # Context: show
-thread-create-show-cancel = Cancellare
-# Context: show
-thread-create-show-create = Creare
-# Context: show
-thread-create-show-create-thread = Crea discussione
+thread-create-new-thread = Nuova discussione
 # Context: show
 thread-create-show-enter-a-message-to-start-the-conversation = Scrivi un messaggio per avviare la conversazione!
-# Context: show
-thread-create-show-everyone-who-can-see-this-channel-can-see-the-thread = Tutti coloro che possono vedere questo canale possono vedere il thread.
-# Context: show
-thread-create-show-message = Messaggio
 # Context: show
 thread-create-show-private-hint = Solo le persone che inviti e i moderatori possono vederlo
 # Context: show
 thread-create-show-private-thread = Thread privato
-# Context: show
-thread-create-show-the-selected-message-starts-the-thread-everyone-who-can-see = Il messaggio selezionato avvia il thread. Tutti coloro che possono vedere questo canale possono vedere il thread.
 # Context: show
 thread-create-show-thread-name = Nome del thread
 

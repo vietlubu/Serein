@@ -3915,23 +3915,13 @@ theme-editor-toolbar-working = 작업 중…
 
 ## crates/ui/src/thread_create.rs
 # Context: show
-thread-create-show-cancel = 취소
-# Context: show
-thread-create-show-create = 만들기
-# Context: show
-thread-create-show-create-thread = 스레드 만들기
+thread-create-new-thread = 새 스레드
 # Context: show
 thread-create-show-enter-a-message-to-start-the-conversation = 메시지를 입력해 대화를 시작하세요!
-# Context: show
-thread-create-show-everyone-who-can-see-this-channel-can-see-the-thread = 이 채널을 볼 수 있는 모든 사람이 스레드를 볼 수 있습니다.
-# Context: show
-thread-create-show-message = 메시지
 # Context: show
 thread-create-show-private-hint = 초대한 사람과 모더레이터만 볼 수 있습니다
 # Context: show
 thread-create-show-private-thread = 비공개 스레드
-# Context: show
-thread-create-show-the-selected-message-starts-the-thread-everyone-who-can-see = 선택한 메시지로 스레드를 시작합니다. 이 채널을 볼 수 있는 모든 사람이 스레드를 볼 수 있습니다.
 # Context: show
 thread-create-show-thread-name = 스레드 이름
 

@@ -3876,23 +3876,13 @@ theme-editor-toolbar-working = Pracovní…
 
 ## crates/ui/src/thread_create.rs
 # Context: show
-thread-create-show-cancel = Zrušit
-# Context: show
-thread-create-show-create = Vytvořit
-# Context: show
-thread-create-show-create-thread = Vytvořit vlákno
+thread-create-new-thread = Nové vlákno
 # Context: show
 thread-create-show-enter-a-message-to-start-the-conversation = Napište zprávu a zahajte konverzaci!
-# Context: show
-thread-create-show-everyone-who-can-see-this-channel-can-see-the-thread = Každý, kdo vidí tento kanál, může vidět vlákno.
-# Context: show
-thread-create-show-message = Zpráva
 # Context: show
 thread-create-show-private-hint = Uvidí ho jen pozvaní lidé a moderátoři
 # Context: show
 thread-create-show-private-thread = Soukromé vlákno
-# Context: show
-thread-create-show-the-selected-message-starts-the-thread-everyone-who-can-see = Vybraná zpráva zahájí vlákno. Každý, kdo vidí tento kanál, může vidět vlákno.
 # Context: show
 thread-create-show-thread-name = Název vlákna
 

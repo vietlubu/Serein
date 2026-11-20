@@ -3843,23 +3843,13 @@ theme-editor-toolbar-working = 働く…
 
 ## crates/ui/src/thread_create.rs
 # Context: show
-thread-create-show-cancel = キャンセル
-# Context: show
-thread-create-show-create = 作成する
-# Context: show
-thread-create-show-create-thread = スレッドの作成
+thread-create-new-thread = 新しいスレッド
 # Context: show
 thread-create-show-enter-a-message-to-start-the-conversation = メッセージを入力して会話を始めましょう！
-# Context: show
-thread-create-show-everyone-who-can-see-this-channel-can-see-the-thread = このチャンネルを閲覧できる人は誰でもスレッドを閲覧できます。
-# Context: show
-thread-create-show-message = メッセージ
 # Context: show
 thread-create-show-private-hint = 招待した人とモデレーターだけが閲覧できます
 # Context: show
 thread-create-show-private-thread = プライベートスレッド
-# Context: show
-thread-create-show-the-selected-message-starts-the-thread-everyone-who-can-see = 選択したメッセージによってスレッドが開始されます。このチャンネルを閲覧できる人は誰でもスレッドを閲覧できます。
 # Context: show
 thread-create-show-thread-name = スレッド名
 

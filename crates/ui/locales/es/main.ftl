@@ -3845,23 +3845,13 @@ theme-editor-toolbar-working = Laboral…
 
 ## crates/ui/src/thread_create.rs
 # Context: show
-thread-create-show-cancel = Cancelar
-# Context: show
-thread-create-show-create = Crear
-# Context: show
-thread-create-show-create-thread = Crear hilo
+thread-create-new-thread = Nuevo hilo
 # Context: show
 thread-create-show-enter-a-message-to-start-the-conversation = ¡Escribe un mensaje para empezar la conversación!
-# Context: show
-thread-create-show-everyone-who-can-see-this-channel-can-see-the-thread = Todos los que puedan ver este canal pueden ver el hilo.
-# Context: show
-thread-create-show-message = Mensaje
 # Context: show
 thread-create-show-private-hint = Solo pueden verlo las personas que invites y los moderadores
 # Context: show
 thread-create-show-private-thread = Hilo privado
-# Context: show
-thread-create-show-the-selected-message-starts-the-thread-everyone-who-can-see = El mensaje seleccionado inicia el hilo. Todos los que puedan ver este canal pueden ver el hilo.
 # Context: show
 thread-create-show-thread-name = Nombre del hilo
 

@@ -5940,10 +5940,15 @@ impl MessagingUi {
 			self.attachment_view_open.is_none(),
 		);
 		self.search.extension_actions = self.extensions.message_actions();
-		let search_open =
-			self.search.results_visible(state) && state.selected.is_some() && !selected_voice;
-		let thread_pane_open =
-			wide_members && !search_open && !selected_voice && state.thread_pane().is_some();
+		// A thread draft takes the right pane at any width, over search, members and a peek.
+		let creating = self.thread_create.is_open() && !selected_voice;
+		let search_open = !creating
+			&& self.search.results_visible(state)
+			&& state.selected.is_some()
+			&& !selected_voice;
+		let thread_pane_open = !search_open
+			&& !selected_voice
+			&& (creating || (wide_members && state.thread_pane().is_some()));
 		let show_members = !selected_voice
 			&& !search_open
 			&& !thread_pane_open
@@ -5999,33 +6004,50 @@ impl MessagingUi {
 		if thread_pane_open {
 			let shortcuts_available = self.shortcuts_available(state);
 			let pane_max = self.prepare_thread_pane(ui);
-			let pane = egui::Panel::right("thread-pane")
-				.resizable(true)
+			let pane = if wide_members {
+				egui::Panel::right("thread-pane")
+					.resizable(true)
+					.default_size(
+						f32::from(self.reading_preferences.thread_pane_width).min(pane_max),
+					)
+					.size_range(320.0..=pane_max)
+			} else {
+				// Too narrow to share: a draft covers the chat, like the narrow member list.
+				egui::Panel::right("thread-create-narrow")
+					.resizable(false)
+					.exact_size(ui.available_width())
+			};
+			let pane = pane
 				.show_separator_line(!design::has_window_background(ui))
-				.default_size(f32::from(self.reading_preferences.thread_pane_width).min(pane_max))
-				.size_range(320.0..=pane_max)
 				.frame(egui::Frame::new().fill(design::window_palette(ui).chat))
 				.show(ui, |ui| {
-					self.thread_pane.show(
-						ui,
-						state,
-						&mut commands,
-						&mut self.avatars,
-						&mut self.profile,
-						&mut self.channel_menu,
-						&mut self.timeline,
-						shortcuts::ShortcutView::new(
-							&self.channel_preferences,
-							shortcuts_available,
-						),
-						self.hide_nitro_emojis,
-						&self.keybinds,
-					);
+					if creating {
+						self.thread_create
+							.show(ui, state, &mut commands, &self.keybinds);
+					} else {
+						self.thread_pane.show(
+							ui,
+							state,
+							&mut commands,
+							&mut self.avatars,
+							&mut self.profile,
+							&mut self.channel_menu,
+							&mut self.timeline,
+							shortcuts::ShortcutView::new(
+								&self.channel_preferences,
+								shortcuts_available,
+							),
+							self.hide_nitro_emojis,
+							&self.keybinds,
+						);
+					}
 				});
 			if let Some(target) = self.thread_pane.deleting.take() {
 				self.deleting = Some(target);
 			}
-			self.record_thread_pane(pane.response.rect.width());
+			if wide_members {
+				self.record_thread_pane(pane.response.rect.width());
+			}
 		}
 		// A one-to-one DM shows the other person's profile where servers list members.
 		let dm_recipient = (show_members && wide_members)
@@ -6704,7 +6726,7 @@ impl MessagingUi {
 			state.clear_channel_action_result(channel);
 			self.thread_create.open(channel, None, String::new());
 		}
-		if let Some(thread) = self.thread_create.show(&ctx, state, &mut commands) {
+		if let Some(thread) = self.thread_create.poll(state, &mut commands) {
 			// A message-started thread shares its starter's id; others have no starter row to show.
 			self.timeline.thread_open = Some((thread, thread));
 		}
