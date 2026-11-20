@@ -98,15 +98,15 @@ impl FolderUi {
 }
 
 impl MessagingUi {
-	/// Home, then servers in rail order with folders flattened; `Some(None)` is Home.
-	pub(super) fn adjacent_server(&self, state: &State, forward: bool) -> Option<Option<Id>> {
+	/// Home, then servers in rail order with folders flattened; `None` is Home.
+	pub(super) fn server_order(&self, state: &State) -> Vec<Option<Id>> {
 		let folders = state
 			.guild_folders
 			.as_ref()
 			.map(|settings| &settings.folders[..])
 			.unwrap_or_default();
 		// Same placement as `FolderUi::sync_rows`: unfiled servers lead, then folder members.
-		let order: Vec<Option<Id>> = std::iter::once(None)
+		std::iter::once(None)
 			.chain(
 				state
 					.guilds
@@ -121,7 +121,12 @@ impl MessagingUi {
 					.filter(|&id| state.guild(id).is_some())
 					.map(Some),
 			)
-			.collect();
+			.collect()
+	}
+
+	/// Neighbour of the open server in `server_order`; `Some(None)` is Home.
+	pub(super) fn adjacent_server(&self, state: &State, forward: bool) -> Option<Option<Id>> {
+		let order = self.server_order(state);
 		let current = order.iter().position(|&id| id == self.guild)?;
 		let next = if forward {
 			current.checked_add(1)?
@@ -129,6 +134,23 @@ impl MessagingUi {
 			current.checked_sub(1)?
 		};
 		order.get(next).copied()
+	}
+
+	/// Mirrors the rail's server click, or its Home click for `None`.
+	pub(super) fn open_server(
+		&mut self,
+		state: &mut State,
+		commands: &mut Vec<Command>,
+		target: Option<Id>,
+	) {
+		self.guild = target;
+		match target {
+			Some(id) => commands.extend(state.select_guild(id)),
+			None => {
+				commands.extend(state.open_messages());
+				self.search.open = false;
+			}
+		}
 	}
 }
 #[derive(Clone, Copy, Debug, PartialEq)]
