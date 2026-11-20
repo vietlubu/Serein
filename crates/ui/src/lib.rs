@@ -143,7 +143,7 @@ mod user_direct;
 mod user_menu;
 mod verification;
 mod voice;
-use client_core::{Command, MAX_DRAFT_BYTES, NavStep, State};
+use client_core::{Command, MAX_DRAFT_BYTES, State};
 use egui::{RichText, TextEdit};
 use model::{Freshness, Id};
 pub use verification::VerificationUi;
@@ -328,6 +328,8 @@ pub struct MessagingUi {
 	banner_rows: usize,
 	/// The channel list's viewport and scroll offset as last drawn, for the banner riding it.
 	channel_list_view: Option<(egui::Rect, f32)>,
+	/// History navigation's destination, revealed and flashed by the channel list.
+	nav_reveal: Option<categories::NavReveal>,
 	channel_move: Option<(Id, client_core::channel_actions::Action)>,
 	search: search::SearchUi,
 	settings: settings::Settings,
@@ -1663,14 +1665,18 @@ impl MessagingUi {
 			if back {
 				let _ = self.server_settings.navigate_away(state);
 			}
-		} else if let Some(NavStep {
-			command: Some(command),
-		}) = if back {
+		} else if let Some(step) = if back {
 			state.navigate_back()
 		} else {
 			state.navigate_forward()
 		} {
-			commands.push(command);
+			if let Some(command) = step.command {
+				commands.push(command);
+			}
+			self.nav_reveal = state.selected.map(|channel| categories::NavReveal {
+				channel,
+				since: None,
+			});
 		}
 	}
 	fn member_rows(&mut self, ui: &mut egui::Ui, state: &mut State, commands: &mut Vec<Command>) {
@@ -2841,14 +2847,41 @@ impl MessagingUi {
 					}
 				}
 				Some(c) => {
-					let icon = match c.kind {
-						2 | 13 => icons::Icon::Speaker,
-						5 => icons::Icon::Megaphone,
-						15 | 16 => icons::Icon::Forum,
-						10..=12 => icons::Icon::Thread,
-						_ => icons::Icon::Hash,
-					};
-					icons::inline(ui, icon, 22.0, colors.muted);
+					let parent = matches!(c.kind, 10..=12)
+						.then_some(c.parent_id)
+						.flatten()
+						.and_then(|id| state.channel(id))
+						.map(|parent| {
+							(
+								parent.id,
+								parent.kind,
+								state.conversation_name(parent).to_owned(),
+							)
+						});
+					if let Some((parent, kind, name)) = parent {
+						icons::inline(ui, header_icon(kind), 22.0, colors.muted);
+						let max = (ui.available_width() * 0.3).min(240.0);
+						let response = ui
+							.scope(|ui| {
+								ui.set_max_width(max);
+								ui.add(
+									egui::Label::new(
+										design::semibold(ui, name, 16.0).color(colors.muted),
+									)
+									.truncate()
+									.sense(egui::Sense::click()),
+								)
+							})
+							.inner
+							.on_hover_cursor(egui::CursorIcon::PointingHand);
+						if response.clicked()
+							&& let Some(command) = state.select(parent)
+						{
+							commands.push(command);
+						}
+						icons::inline(ui, icons::Icon::ChevronRight, 16.0, colors.muted);
+					}
+					icons::inline(ui, header_icon(c.kind), 22.0, colors.muted);
 				}
 				None => {}
 			}
@@ -11437,6 +11470,15 @@ pub fn debug_pr565(mut state: State, mut user: model::User) {
 	println!(
 		"Profile avatar navigation, connections, username fallback, GIF retry and Markdown checks passed."
 	);
+}
+fn header_icon(kind: u8) -> icons::Icon {
+	match kind {
+		2 | 13 => icons::Icon::Speaker,
+		5 => icons::Icon::Megaphone,
+		15 | 16 => icons::Icon::Forum,
+		10..=12 => icons::Icon::Thread,
+		_ => icons::Icon::Hash,
+	}
 }
 
 #[cfg(all(debug_assertions, feature = "demo"))]

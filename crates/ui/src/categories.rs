@@ -520,6 +520,21 @@ fn shelf_row(rows: &[CachedRow], index: usize) -> bool {
 
 /// Thread rows start after the spine's elbow, aligned under their parent's name.
 const THREAD_INDENT: f32 = 26.0;
+/// History navigation's destination row: scrolled into view once, then flashed.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) struct NavReveal {
+	pub channel: Id,
+	/// Input time the row was first found; `None` until then.
+	pub since: Option<f64>,
+}
+/// Seconds the destination row flashes (three pulses).
+const NAV_FLASH: f64 = 0.9;
+/// Flash strength 0..=1 for `elapsed` seconds into the flash: three sine humps.
+fn nav_flash(elapsed: f64) -> f32 {
+	(elapsed / NAV_FLASH * 3.0 * std::f64::consts::PI)
+		.sin()
+		.abs() as f32
+}
 /// Height of a server channel row; a server banner holds whole rows of it.
 pub(super) const CHANNEL_ROW: f32 = 34.0;
 
@@ -790,16 +805,60 @@ impl MessagingUi {
 			+ usize::from(empty_dms)
 			+ banner_rows
 			+ usize::from(browse.is_some());
+		let now = ui.input(|input| input.time);
+		let mut reveal_offset = None;
+		if let Some(reveal) = self.nav_reveal {
+			if state.selected != Some(reveal.channel)
+				|| reveal.since.is_some_and(|since| now - since >= NAV_FLASH)
+			{
+				self.nav_reveal = None;
+			} else if reveal.since.is_none() {
+				let found = self.channel_cache.rows.iter().position(|row| {
+					matches!(row, CachedRow::Channel(index, ..) if state.channels[*index].id == reveal.channel)
+				});
+				match found {
+					Some(index) => {
+						let lead = banner_rows + usize::from(browse.is_some());
+						let top = (lead + index) as f32 * row_height;
+						// Mirrors `scroll::Session::attach`'s ScrollArea id.
+						let id =
+							ui.make_persistent_id(egui::IdSalt::new(("channel-list", self.guild)));
+						let offset = egui::scroll_area::State::load(ui.ctx(), id)
+							.map_or(0.0, |scroll| scroll.clamped_offset().y);
+						let viewport = ui.available_height();
+						if top < offset || top + row_height > offset + viewport {
+							reveal_offset = Some((top - (viewport - row_height) / 2.0).max(0.0));
+						}
+						self.nav_reveal = Some(NavReveal {
+							since: Some(now),
+							..reveal
+						});
+					}
+					// The right list is drawn but the row is absent (collapsed category, unlisted thread): give up.
+					None if self.guild == state.channel(reveal.channel).and_then(|c| c.guild) => {
+						self.nav_reveal = None;
+					}
+					// `self.guild` syncs to the selection one frame late after title-bar navigation; retry next frame.
+					None => {}
+				}
+			}
+		}
+		let flash = self
+			.nav_reveal
+			.and_then(|reveal| Some((reveal.channel, nav_flash(now - reveal.since?))));
+		if flash.is_some() {
+			ui.ctx().request_repaint();
+		}
 		let previous_spacing = ui.spacing().item_spacing.y;
 		ui.spacing_mut().item_spacing.y = 0.0;
 		let mut drop_rows = Vec::new();
+		let mut area = egui::ScrollArea::vertical().auto_shrink([false, false]);
+		if let Some(y) = reveal_offset {
+			area = area.vertical_scroll_offset(y);
+		}
 		let output = self
 			.scroll
-			.attach(
-				ui,
-				("channel-list", self.guild),
-				egui::ScrollArea::vertical().auto_shrink([false, false]),
-			)
+			.attach(ui, ("channel-list", self.guild), area)
 			.show_rows(ui, row_height, row_count, |ui, range| {
 				for index in range {
 					let Some(mut index) = index.checked_sub(banner_rows) else {
@@ -977,6 +1036,22 @@ impl MessagingUi {
 										)
 									})
 									.inner;
+								if let Some((target, strength)) = flash
+									&& target == channel.id
+								{
+									let rect = response.rect.shrink(1.0);
+									ui.painter().rect_filled(
+										rect,
+										6,
+										colors.accent.gamma_multiply(0.35 * strength),
+									);
+									ui.painter().rect_stroke(
+										rect,
+										6,
+										(1.5, colors.accent.gamma_multiply(strength)),
+										egui::StrokeKind::Inside,
+									);
+								}
 								if draggable
 									&& response.drag_started_by(egui::PointerButton::Primary)
 								{
@@ -1109,6 +1184,21 @@ impl MessagingUi {
 									highlight,
 									8,
 									crate::design::row_highlight(ui, colors.hover, 1.0),
+								);
+							}
+							if let Some((target, strength)) = flash
+								&& target == channel.id
+							{
+								ui.painter().rect_filled(
+									highlight,
+									8,
+									colors.accent.gamma_multiply(0.35 * strength),
+								);
+								ui.painter().rect_stroke(
+									highlight,
+									8,
+									(1.5, colors.accent.gamma_multiply(strength)),
+									egui::StrokeKind::Inside,
 								);
 							}
 							if dm_list
@@ -2538,6 +2628,81 @@ mod tests {
 		}
 		assert_eq!(picked, Some(Id(8)));
 		assert!(view.archive_parent.is_none());
+	}
+	#[test]
+	fn history_navigation_reveals_off_screen_row() {
+		let mut state = State {
+			user: Some(model::User {
+				id: Id(2),
+				name: "Synthetic member".into(),
+				avatar: None,
+				webhook: false,
+				kind: Default::default(),
+				discriminator: 0,
+				primary_guild: None,
+				cosmetics: None,
+			}),
+			guilds: vec![model::Guild {
+				banner: None,
+				default_message_notifications: None,
+				stickers: None,
+				id: Id(100),
+				name: "Synthetic guild".into(),
+				icon: None,
+				emojis: None,
+			}],
+			channels: (1..=60).map(|i| channel(i, 0, i as i32, None)).collect(),
+			demo: true,
+			..State::default()
+		};
+		state
+			.permissions
+			.replace(test_support::permission_snapshot(&state))
+			.unwrap();
+		state.select(Id(60));
+		assert_eq!(state.selected, Some(Id(60)));
+		let mut view = MessagingUi {
+			guild: Some(Id(100)),
+			nav_reveal: Some(NavReveal {
+				channel: Id(60),
+				since: None,
+			}),
+			..MessagingUi::default()
+		};
+		let ctx = egui::Context::default();
+		let frame = || egui::RawInput {
+			screen_rect: Some(egui::Rect::from_min_size(
+				egui::Pos2::ZERO,
+				egui::vec2(300.0, 400.0),
+			)),
+			..Default::default()
+		};
+		ctx.run_ui(frame(), |ui| {
+			view.channel_list(ui, &mut state);
+		})
+		.drop_without_applying_deltas();
+		assert!(view.nav_reveal.unwrap().since.is_some());
+		assert!(view.channel_list_view.unwrap().1 > 0.0);
+		// A destination hidden in a collapsed category must not leave a reveal pending forever.
+		state.channels.push(channel(200, 4, 0, None));
+		state.channels.push(channel(201, 0, 0, Some(Id(200))));
+		state.revision += 1;
+		state.invalidate_navigation();
+		state
+			.permissions
+			.replace(test_support::permission_snapshot(&state))
+			.unwrap();
+		state.selected = Some(Id(201));
+		view.channel_preferences.collapsed_categories = vec![Id(200)];
+		view.nav_reveal = Some(NavReveal {
+			channel: Id(201),
+			since: None,
+		});
+		ctx.run_ui(frame(), |ui| {
+			view.channel_list(ui, &mut state);
+		})
+		.drop_without_applying_deltas();
+		assert!(view.nav_reveal.is_none());
 	}
 	#[test]
 	fn issue_341_visible_children_keep_category_heading() {
