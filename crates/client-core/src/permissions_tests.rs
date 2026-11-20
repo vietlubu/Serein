@@ -1937,3 +1937,42 @@ fn thread_members_load_without_parent_list_and_reject_retired_replies() {
 	);
 	assert!(state.request_members().is_none());
 }
+
+#[test]
+fn thread_mentions_keep_parent_members_after_leaving_the_parent_list() {
+	let mut state = state();
+	state.request_members();
+	let mut reply = state.members.clone().unwrap();
+	reply.freshness = Freshness::Fresh;
+	reply.slots = vec![Some(model::MemberSlot::Person(model::Member {
+		user: User {
+			id: Id(77),
+			..user()
+		},
+		nick: Some("Parent reader".into()),
+		roles: vec![],
+		status: None,
+		custom_status: None,
+		activities: vec![],
+		clients: Default::default(),
+	}))];
+	apply(&mut state, Event::Members(reply));
+	assert!(state.parent_members(Id(30)).is_empty());
+	assert!(state.parent_members(Id(20)).is_empty());
+	let kept = |state: &State| {
+		state
+			.parent_members(Id(30))
+			.iter()
+			.map(|member| member.user.id)
+			.collect::<Vec<_>>()
+	};
+	state.select(Id(30));
+	assert_eq!(kept(&state), [Id(77)]);
+	// The thread's own participant list must not replace its parent's audience.
+	state.request_members();
+	let mut thread = state.members.clone().unwrap();
+	thread.freshness = Freshness::Fresh;
+	apply(&mut state, Event::Members(thread));
+	state.select(Id(21));
+	assert_eq!(kept(&state), [Id(77)]);
+}

@@ -44,12 +44,19 @@ pub struct View {
 	pub error: Option<&'static str>,
 }
 impl State {
+	/// Conversations whose composers may search members: the open channel and the peeked thread.
+	fn composes_in(&self, channel: Id) -> bool {
+		self.selected == Some(channel)
+			|| self
+				.thread_pane()
+				.is_some_and(|pane| pane.thread == channel)
+	}
 	pub fn search_members(&mut self, channel: Id, query: &str, slot: usize) -> Option<Command> {
 		let guild = self.channel(channel)?.guild?;
 		if slot != 0
 			|| !self.gateway_connected
 			|| !self.can_view(channel)
-			|| self.selected != Some(channel)
+			|| !self.composes_in(channel)
 		{
 			return None;
 		}
@@ -125,7 +132,7 @@ impl State {
 		result: Result<Vec<Member>, Failure>,
 	) {
 		if !request.valid()
-			|| self.selected != Some(request.channel)
+			|| !self.composes_in(request.channel)
 			|| !self.gateway_connected
 			|| !self.can_view(request.channel)
 			|| self.channel(request.channel).and_then(|c| c.guild) != Some(request.guild)

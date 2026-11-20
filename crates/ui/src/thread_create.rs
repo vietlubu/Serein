@@ -59,22 +59,25 @@ impl ThreadCreateUi {
 			submitted: false,
 		});
 	}
-	pub fn show(&mut self, ctx: &egui::Context, state: &mut State, commands: &mut Vec<Command>) {
+	pub fn show(
+		&mut self,
+		ctx: &egui::Context,
+		state: &mut State,
+		commands: &mut Vec<Command>,
+	) -> Option<Id> {
 		if self.generation != state.generation {
 			self.generation = state.generation;
 			self.request = None;
-			return;
+			return None;
 		}
-		let Some(request) = &mut self.request else {
-			return;
-		};
+		let request = self.request.as_mut()?;
 		let channel = request.channel;
 		if !state.can_create_thread(channel) && !request.submitted {
 			self.request = None;
-			return;
+			return None;
 		}
 		if request.submitted && state.channel_action_succeeded(channel) {
-			// The reducer admitted the new thread; open it like Discord does.
+			// The reducer admitted the new thread; the caller peeks it like a thread card.
 			let name = request.name.trim().to_owned();
 			let created = state
 				.channels
@@ -93,7 +96,6 @@ impl ThreadCreateUi {
 			let content = std::mem::take(&mut request.content);
 			self.request = None;
 			if let Some(id) = created {
-				commands.extend(state.select(id));
 				let text = content.trim();
 				if !text.is_empty() {
 					match state.prepare_text_send_to(id, text) {
@@ -105,7 +107,7 @@ impl ThreadCreateUi {
 					}
 				}
 			}
-			return;
+			return created;
 		}
 		let mut close = false;
 		let result = dialog::Dialog::new(
@@ -192,6 +194,7 @@ impl ThreadCreateUi {
 		if close || result.close {
 			self.request = None;
 		}
+		None
 	}
 }
 
