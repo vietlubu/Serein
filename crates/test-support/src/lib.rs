@@ -1393,6 +1393,11 @@ pub fn system_demo_state() -> State {
 		}];
 		state.timeline.insert(m, false, false).unwrap();
 	}
+	// The flagged message that started the "Introductions thread" row's thread (ids match).
+	let mut starter = message(28, Id(20));
+	starter.flags = model::HAS_THREAD;
+	starter.content = "Introductions start here".into();
+	state.timeline.insert(starter, false, false).unwrap();
 	state.revision += 1;
 	state
 }
