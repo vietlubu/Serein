@@ -6019,6 +6019,7 @@ impl MessagingUi {
 							shortcuts_available,
 						),
 						self.hide_nitro_emojis,
+						&self.keybinds,
 					);
 				});
 			if let Some(target) = self.thread_pane.deleting.take() {

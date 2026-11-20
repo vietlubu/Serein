@@ -1,4 +1,4 @@
-//! Discord-style thread peek beside the parent channel: message rows with the main chat's actions and a composer with replies, edits and `@` suggestions.
+//! Discord-style thread peek beside the parent channel: message rows with the main chat's actions and a composer with replies, edits, `@` suggestions, a multi-line input and the emoji/GIF picker.
 use crate::{design, icons, shortcuts::ShortcutView, timeline::TimelineView};
 use client_core::{Command, State};
 use egui::RichText;
@@ -15,6 +15,9 @@ pub(super) struct ThreadPaneUi {
 	mentions: crate::mentions::Menu,
 	lookup: crate::member_search::Search,
 	layout: crate::composer_text::Layout,
+	emoji: crate::emoji_picker::Picker,
+	/// Returns focus to the input after a pick closes the picker.
+	refocus: bool,
 	/// The message the composer edits: channel and id.
 	editing: Option<(Id, Id)>,
 	/// The draft set aside while editing.
@@ -71,6 +74,7 @@ impl ThreadPaneUi {
 		timeline: &mut TimelineView,
 		view: ShortcutView<'_>,
 		hide_nitro_emojis: bool,
+		keybinds: &model::Keybinds,
 	) {
 		let Some(thread) = state.thread_pane().map(|pane| pane.thread) else {
 			return;
@@ -156,7 +160,12 @@ impl ThreadPaneUi {
 		let input_id = egui::Id::unique(("thread-pane-input", thread));
 		egui::Panel::bottom("thread-pane-composer")
 			.show_separator_line(false)
-			.frame(egui::Frame::new().inner_margin(egui::Margin::symmetric(16, 12)))
+			.frame(egui::Frame::new().inner_margin(egui::Margin {
+				left: 16,
+				right: 16,
+				top: 2,
+				bottom: 8,
+			}))
 			.show(ui, |ui| {
 				let mut ime_frame = self.composing;
 				ui.input(|input| {
@@ -171,6 +180,9 @@ impl ThreadPaneUi {
 					}
 				});
 				let ctx = ui.ctx().clone();
+				if std::mem::take(&mut self.refocus) {
+					ctx.memory_mut(|m| m.request_focus(input_id));
+				}
 				// Suggestion rows can take focus on press; keep the input alive until release.
 				let pointer = self.mentions.pointer_interacting(&ctx, thread);
 				if pointer && !ime_frame {
@@ -222,7 +234,13 @@ impl ThreadPaneUi {
 						)
 					});
 				}
-				let roles = crate::mentions::known_roles(state, thread);
+				let enter = !ime_frame
+					&& ctx.memory(|m| m.has_focus(input_id))
+					&& ctx.input_mut(|i| {
+						keybinds
+							.chords(model::KeybindAction::SendMessage)
+							.any(|chord| crate::keybinds::pressed_exact(i, chord))
+					});
 				let mass =
 					state.permission(thread, model::permissions::MENTION_EVERYONE) == Some(true);
 				if !ime_frame
@@ -234,7 +252,7 @@ impl ThreadPaneUi {
 						&self.draft,
 						ui.available_width(),
 						&users,
-						roles,
+						crate::mentions::known_roles(state, thread),
 						&state.channels,
 						&state.game_mentions,
 						mass,
@@ -306,8 +324,7 @@ impl ThreadPaneUi {
 					} else {
 						false
 					};
-					egui::Frame::new()
-						.fill(colors.raised)
+					design::glass_frame(ui, colors.raised, egui::Margin::symmetric(10, 6))
 						.corner_radius(if capped {
 							egui::CornerRadius {
 								nw: 0,
@@ -318,57 +335,206 @@ impl ThreadPaneUi {
 						} else {
 							egui::CornerRadius::same(8)
 						})
-						.inner_margin(egui::Margin::symmetric(12, 10))
 						.show(ui, |ui| {
 							ui.add_enabled_ui(state.can_send_to(thread), |ui| {
-								let layout = &mut self.layout;
-								let mut layouter =
-									|ui: &egui::Ui, buffer: &dyn egui::TextBuffer, width: f32| {
-										layout.galley_games(
-											ui,
-											buffer.as_str(),
-											width,
-											&users,
-											roles,
-											&state.channels,
-											&state.game_mentions,
-											mass,
-											avatars,
-											state.demo,
-										)
-									};
-								let mut output = egui::TextEdit::singleline(&mut self.draft)
-									.id(input_id)
-									.layouter(&mut layouter)
-									.frame(egui::Frame::NONE)
-									.char_limit(state.content_limit())
-									.desired_width(f32::INFINITY)
-									.hint_text(crate::i18n::translate_args(
-										"thread-pane-message-hint",
-										&[("thread", &channel.name)],
-									))
-									.show(ui);
-								self.layout.paint(ui, &output, avatars);
-								if !ime_frame {
-									self.layout.snap_cursor(&mut output, &ctx);
-								}
-								let input = output.response;
-								// An emptied edit submits too: it asks to delete the message.
-								if input.lost_focus()
-									&& ui.input(|i| i.key_pressed(egui::Key::Enter))
-									&& !ime_frame && (self.editing.is_some()
-									|| !self.draft.trim().is_empty())
-								{
-									submit = Some(self.draft.trim().to_owned());
-									input.request_focus();
-								}
-								// An open suggestion menu consumes Escape before the input sees it.
-								if input.lost_focus()
-									&& ui.input(|i| i.key_pressed(egui::Key::Escape))
-									&& !ime_frame
-								{
-									cancel = true;
-								}
+								let limit = state.content_limit();
+								let count = self.draft.chars().count();
+								let can_send = state.can_send_to(thread)
+									&& count <= limit && (self.editing.is_some()
+									|| !self.draft.trim().is_empty());
+								ui.horizontal(|ui| {
+									ui.spacing_mut().item_spacing.x = 8.0;
+									ui.with_layout(
+										egui::Layout::right_to_left(egui::Align::Center),
+										|ui| {
+											ui.spacing_mut().item_spacing.x = 4.0;
+											let send_button = ui
+												.add_enabled_ui(can_send, |ui| {
+													icons::button(
+														ui,
+														icons::Icon::Send,
+														28.0,
+														&crate::i18n::translate(
+															if self.editing.is_some() {
+																"lib-ime-updates-text-save-edit"
+															} else {
+																"lib-ime-updates-text-send-message"
+															},
+														),
+													)
+												})
+												.inner;
+											let send = enter || send_button.clicked();
+											if count + 200 >= limit {
+												ui.label(
+													RichText::new(format!(
+														"{}",
+														limit.saturating_sub(count)
+													))
+													.size(11.0)
+													.color(if count >= limit {
+														colors.danger
+													} else {
+														colors.muted
+													}),
+												);
+											}
+											let pick = ui
+												.add_enabled_ui(!ime_frame, |ui| {
+													self.emoji.hide_nitro_emojis =
+														hide_nitro_emojis;
+													self.emoji
+														.show(ui, state, thread, avatars, commands)
+												})
+												.inner;
+											if pick.is_some() && !self.emoji.is_open() {
+												self.refocus = true;
+												ctx.request_repaint();
+											}
+											match pick {
+												Some(crate::emoji_picker::Pick::Insert(text)) => {
+													let range =
+														egui::text_edit::TextEditState::load(
+															&ctx, input_id,
+														)
+														.and_then(|s| s.cursor.char_range());
+													match crate::emoji_picker::insert_with_limit(
+														&mut self.draft,
+														&text,
+														range,
+														limit * 4,
+														limit,
+													) {
+														Some(cursor) => {
+															place_caret(&ctx, input_id, cursor)
+														}
+														None => {
+															state.status = "Emoji will not fit. Shorten this message or free draft space.";
+														}
+													}
+												}
+												// A chosen GIF is its own message; the typed draft stays untouched.
+												Some(crate::emoji_picker::Pick::Send(url)) => {
+													if self.editing.is_some() {
+														state.status = "Finish or cancel the edit before sending a GIF.";
+													} else if let Some(command) =
+														state.prepare_text_send_to(thread, &url)
+													{
+														commands.push(command);
+													}
+												}
+												// Core sends stickers only to the selected channel.
+												Some(crate::emoji_picker::Pick::Sticker(_)) => {
+													state.status = "Stickers can only be sent from the main composer.";
+												}
+												Some(
+													crate::emoji_picker::Pick::React(..)
+													| crate::emoji_picker::Pick::Choose(_),
+												)
+												| None => {}
+											}
+											ui.with_layout(
+												egui::Layout::left_to_right(egui::Align::Center),
+												|ui| {
+													let mut output = egui::ScrollArea::vertical()
+														.id_salt((input_id, "scroll"))
+														.max_height(
+															ctx.viewport_rect().height() * 0.5,
+														)
+														.min_scrolled_height(
+															ctx.viewport_rect().height() * 0.5,
+														)
+														.auto_shrink([false, true])
+														.show(ui, |ui| {
+															let layout = &mut self.layout;
+															let mut layouter =
+																|ui: &egui::Ui,
+																 buffer: &dyn egui::TextBuffer,
+																 width: f32| {
+																	layout.galley_games(
+																	ui,
+																	buffer.as_str(),
+																	width,
+																	&users,
+																	crate::mentions::known_roles(
+																		state, thread,
+																	),
+																	&state.channels,
+																	&state.game_mentions,
+																	mass,
+																	avatars,
+																	state.demo,
+																)
+																};
+															// A pre-laid galley keeps a long thread name on one elided line.
+															let hint = if self.draft.is_empty() {
+																let mut job = egui::text::LayoutJob::simple_singleline(
+																	crate::i18n::translate_args(
+																		"thread-pane-message-hint",
+																		&[("thread", &channel.name)],
+																	),
+																	egui::TextStyle::Body.resolve(ui.style()),
+																	ui.visuals().weak_text_color(),
+																);
+																job.wrap = egui::text::TextWrapping::truncate_at_width(
+																	ui.available_width(),
+																);
+																egui::WidgetText::from(
+																	ui.painter().layout_job(job),
+																)
+															} else {
+																egui::WidgetText::default()
+															};
+															let output = egui::TextEdit::multiline(
+																&mut self.draft,
+															)
+															.id(input_id)
+															.layouter(&mut layouter)
+															.event_filter(egui::EventFilter {
+																horizontal_arrows: true,
+																vertical_arrows: true,
+																escape: false,
+																..Default::default()
+															})
+															.char_limit(limit)
+															.desired_rows(1)
+															.desired_width(f32::INFINITY)
+															.min_size(egui::vec2(
+																0.0,
+																ui.spacing().interact_size.y,
+															))
+															.align(egui::Align2::LEFT_CENTER)
+															.frame(egui::Frame::NONE)
+															.hint_text(hint)
+															.show(ui);
+															self.layout.paint(ui, &output, avatars);
+															output
+														})
+														.inner;
+													if !ime_frame {
+														self.layout.snap_cursor(&mut output, &ctx);
+													}
+													// An emptied edit submits too: it asks to delete the message.
+													if send
+														&& !ime_frame && (self.editing.is_some()
+														|| !self.draft.trim().is_empty())
+													{
+														submit = Some(self.draft.trim().to_owned());
+														output.response.request_focus();
+													}
+													// An open suggestion menu consumes Escape before the input sees it.
+													if output.response.lost_focus()
+														&& ui.input(|i| {
+															i.key_pressed(egui::Key::Escape)
+														}) && !ime_frame
+													{
+														cancel = true;
+													}
+												},
+											);
+										},
+									);
+								});
 							});
 						})
 				});
