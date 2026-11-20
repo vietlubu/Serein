@@ -1,4 +1,4 @@
-//! Discord-style thread peek beside the parent channel: read-only rows and a plain reply box.
+//! Discord-style thread peek beside the parent channel: read-only rows and a reply box with `@` suggestions.
 use crate::{design, icons, shortcuts::ShortcutView};
 use client_core::{Command, State};
 use egui::RichText;
@@ -12,6 +12,9 @@ pub(super) struct ThreadPaneUi {
 	draft: String,
 	composing: bool,
 	formats: crate::markdown::FormatCache,
+	mentions: crate::mentions::Menu,
+	lookup: crate::member_search::Search,
+	layout: crate::composer_text::Layout,
 	pub opening: Option<String>,
 	pub channel_reference: Option<Id>,
 	/// The thread whose name or "Open in Full View" was chosen.
@@ -23,6 +26,8 @@ impl ThreadPaneUi {
 		if self.thread != Some(thread) {
 			self.draft.clear();
 			self.formats = Default::default();
+			self.mentions = Default::default();
+			self.layout = Default::default();
 		}
 		self.thread = Some(thread);
 		self.origin = Some(origin);
@@ -38,6 +43,7 @@ impl ThreadPaneUi {
 		profile: &mut crate::profiles::ProfileSession,
 		channel_menu: &mut crate::channel_menu::ChannelMenu,
 		view: ShortcutView<'_>,
+		hide_nitro_emojis: bool,
 	) {
 		let Some(thread) = state.thread_pane().map(|pane| pane.thread) else {
 			return;
@@ -110,23 +116,118 @@ impl ThreadPaneUi {
 						}
 					}
 				});
-				egui::Frame::new()
+				let input_id = egui::Id::unique(("thread-pane-input", thread));
+				let ctx = ui.ctx().clone();
+				// Suggestion rows can take focus on press; keep the input alive until release.
+				let pointer = self.mentions.pointer_interacting(&ctx, thread);
+				if pointer && !ime_frame {
+					ctx.memory_mut(|memory| memory.request_focus(input_id));
+				}
+				let enabled = !ime_frame
+					&& state.can_send_to(thread)
+					&& ctx.memory(|m| m.has_focus(input_id));
+				let users = if enabled || self.draft.contains("<@") {
+					crate::mentions::known_users(state, thread)
+				} else {
+					Vec::new()
+				};
+				let cursor = egui::text_edit::TextEditState::load(&ctx, input_id)
+					.and_then(|s| s.cursor.char_range())
+					.filter(|r| r.is_empty())
+					.map(|r| r.primary.index.0);
+				self.mentions.hide_nitro_emojis = hide_nitro_emojis;
+				if std::mem::take(&mut self.mentions.retry_games) {
+					state.game_mentions.status = client_core::game_mentions::Status::Idle;
+				}
+				self.mentions.refresh(
+					state,
+					thread,
+					&self.draft,
+					cursor.filter(|_| enabled),
+					&users,
+				);
+				if state.game_mentions.status == client_core::game_mentions::Status::Idle
+					&& (self.mentions.needs_games() || self.draft.contains("<@$"))
+				{
+					state.game_mentions.request();
+					ctx.request_repaint();
+				}
+				if enabled && let Some(pick) = self.mentions.keys(&ctx) {
+					self.accept(&ctx, input_id, pick, state.content_limit());
+				}
+				if enabled && self.mentions.claims_tab() {
+					// egui moves focus on unclaimed Tab before the menu can consume it.
+					ctx.memory_mut(|m| {
+						m.set_focus_lock_filter(
+							input_id,
+							egui::EventFilter {
+								tab: true,
+								horizontal_arrows: true,
+								vertical_arrows: true,
+								escape: false,
+							},
+						)
+					});
+				}
+				let roles = crate::mentions::known_roles(state, thread);
+				let mass =
+					state.permission(thread, model::permissions::MENTION_EVERYONE) == Some(true);
+				if !ime_frame
+					&& ctx.input(|i| {
+						i.key_pressed(egui::Key::Backspace) || i.key_pressed(egui::Key::Delete)
+					}) {
+					self.layout.galley_games(
+						ui,
+						&self.draft,
+						ui.available_width(),
+						&users,
+						roles,
+						&state.channels,
+						&state.game_mentions,
+						mass,
+						avatars,
+						state.demo,
+					);
+					self.layout.select_deleted_inline(&ctx, input_id);
+				}
+				let frame = egui::Frame::new()
 					.fill(colors.raised)
 					.corner_radius(8)
 					.inner_margin(egui::Margin::symmetric(12, 10))
 					.show(ui, |ui| {
 						ui.add_enabled_ui(state.can_send_to(thread), |ui| {
-							let input = ui.add(
-								egui::TextEdit::singleline(&mut self.draft)
-									.id_salt("thread-pane-input")
-									.frame(egui::Frame::NONE)
-									.char_limit(state.content_limit())
-									.desired_width(f32::INFINITY)
-									.hint_text(crate::i18n::translate_args(
-										"thread-pane-message-hint",
-										&[("thread", &channel.name)],
-									)),
-							);
+							let layout = &mut self.layout;
+							let mut layouter =
+								|ui: &egui::Ui, buffer: &dyn egui::TextBuffer, width: f32| {
+									layout.galley_games(
+										ui,
+										buffer.as_str(),
+										width,
+										&users,
+										roles,
+										&state.channels,
+										&state.game_mentions,
+										mass,
+										avatars,
+										state.demo,
+									)
+								};
+							let mut output = egui::TextEdit::singleline(&mut self.draft)
+								.id(input_id)
+								.layouter(&mut layouter)
+								.frame(egui::Frame::NONE)
+								.char_limit(state.content_limit())
+								.desired_width(f32::INFINITY)
+								.hint_text(crate::i18n::translate_args(
+									"thread-pane-message-hint",
+									&[("thread", &channel.name)],
+								))
+								.show(ui);
+							self.layout.paint(ui, &output, avatars);
+							if !ime_frame {
+								self.layout.snap_cursor(&mut output, &ctx);
+							}
+							let input = output.response;
 							if input.lost_focus()
 								&& ui.input(|i| i.key_pressed(egui::Key::Enter))
 								&& !ime_frame && !self.draft.trim().is_empty()
@@ -136,6 +237,22 @@ impl ThreadPaneUi {
 							}
 						});
 					});
+				let cursor = egui::text_edit::TextEditState::load(&ctx, input_id)
+					.and_then(|s| s.cursor.char_range())
+					.filter(|r| r.is_empty())
+					.map(|r| r.primary.index.0)
+					.filter(|_| enabled);
+				// Refresh against this frame's typing so the popup and its picks match the draft.
+				self.mentions
+					.refresh(state, thread, &self.draft, cursor, &users);
+				if let Some(pick) = self
+					.mentions
+					.show(ui, frame.response.rect, avatars, state.demo)
+				{
+					self.accept(&ctx, input_id, pick, state.content_limit());
+				}
+				self.lookup.text = self.mentions.member_query().to_owned();
+				self.lookup.sync(&ctx, state, thread, 0, commands);
 			});
 		let mut rendered = Vec::new();
 		egui::ScrollArea::vertical()
@@ -228,6 +345,30 @@ impl ThreadPaneUi {
 		if close {
 			state.close_thread_pane();
 		}
+	}
+
+	/// Inserts a picked suggestion and moves the caret after it.
+	fn accept(
+		&mut self,
+		ctx: &egui::Context,
+		id: egui::Id,
+		pick: crate::mentions::Pick,
+		limit: usize,
+	) {
+		// shortcut: the peek has no timestamp picker, so `@time` does nothing here; use the full composer.
+		if pick.time_range().is_some() {
+			return;
+		}
+		let Some(cursor) = crate::mentions::insert(&mut self.draft, pick, false, limit * 4) else {
+			return;
+		};
+		let mut edit = egui::text_edit::TextEditState::load(ctx, id).unwrap_or_default();
+		edit.cursor
+			.set_char_range(Some(egui::text::CCursorRange::one(
+				egui::text::CCursor::new(cursor),
+			)));
+		edit.store(ctx, id);
+		ctx.memory_mut(|memory| memory.request_focus(id));
 	}
 
 	/// One read-only row: avatar and header unless grouped with the previous author's row.

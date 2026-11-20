@@ -5984,6 +5984,7 @@ impl MessagingUi {
 							&self.channel_preferences,
 							shortcuts_available,
 						),
+						self.hide_nitro_emojis,
 					);
 				});
 			self.record_thread_pane(pane.response.rect.width());
@@ -6665,7 +6666,10 @@ impl MessagingUi {
 			state.clear_channel_action_result(channel);
 			self.thread_create.open(channel, None, String::new());
 		}
-		self.thread_create.show(&ctx, state, &mut commands);
+		if let Some(thread) = self.thread_create.show(&ctx, state, &mut commands) {
+			// A message-started thread shares its starter's id; others have no starter row to show.
+			self.timeline.thread_open = Some((thread, thread));
+		}
 		self.new_message
 			.show(&ctx, state, &mut self.avatars, &mut commands);
 		self.attachment_viewer(&ctx, state);

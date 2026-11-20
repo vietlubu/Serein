@@ -792,6 +792,14 @@ pub struct ReadingCursor {
 	pub inset: f32,
 }
 
+/// A server channel's last fresh member rows, kept after its list closes so that channel's
+/// threads can suggest members who have not joined them. Session-only, ≤200 rows.
+pub struct ParentMembers {
+	guild: Id,
+	channel: Id,
+	rows: Vec<Member>,
+}
+
 pub struct State {
 	/// The signed-in account's Discord `premium_type`; 0 until READY reports one.
 	pub premium_type: u8,
@@ -866,6 +874,7 @@ pub struct State {
 	pub auth: auth::AuthState,
 	pub user: Option<User>,
 	pub members: Option<MemberList>,
+	pub parent_members: Option<ParentMembers>,
 	pub member_chunks: MemberChunks,
 	pub member_search: [member_search::View; 2],
 	pub member_search_nonce: u64,
@@ -1106,6 +1115,7 @@ impl Default for State {
 			auth: auth::AuthState::Unauthenticated,
 			user: None,
 			members: None,
+			parent_members: None,
 			member_chunks: MemberChunks::default(),
 			member_search: Default::default(),
 			member_search_nonce: 0,
@@ -1432,7 +1442,7 @@ impl State {
 		self.history_targeted = false;
 		self.history_navigation.clear();
 		if self.shared_member_list_id(channel).is_none() {
-			self.members = None;
+			self.retire_members();
 		}
 		self.member_search = Default::default();
 		self.selected = Some(channel);
@@ -1769,7 +1779,7 @@ impl State {
 	pub fn close_members(&mut self) -> Command {
 		self.member_request = self.member_request.wrapping_add(1);
 		self.member_chunks.clear();
-		self.members = None;
+		self.retire_members();
 		Command::Members {
 			thread: false,
 			guild: None,
@@ -1778,6 +1788,46 @@ impl State {
 			list_id: None,
 			ranges: vec![],
 		}
+	}
+	/// Drops the open member list, keeping a server channel's fresh rows for its threads' mentions.
+	fn retire_members(&mut self) {
+		let Some(list) = self.members.take() else {
+			return;
+		};
+		// Thread and DM lists are not lazy; only a server channel's list describes its parent audience.
+		let Some(guild) = list
+			.guild
+			.filter(|_| list.lazy && list.freshness == Freshness::Fresh)
+		else {
+			return;
+		};
+		let rows = list
+			.slots
+			.into_iter()
+			.flatten()
+			.filter_map(|slot| match slot {
+				MemberSlot::Person(member) => Some(member),
+				MemberSlot::Group(_) => None,
+			})
+			.collect();
+		self.parent_members = Some(ParentMembers {
+			guild,
+			channel: list.channel,
+			rows,
+		});
+	}
+	/// Rows of `thread`'s parent channel from its last fresh member list, for mention suggestions.
+	pub fn parent_members(&self, thread: Id) -> &[Member] {
+		self.parent_members
+			.as_ref()
+			.filter(|kept| {
+				self.channel(thread).is_some_and(|c| {
+					matches!(c.kind, 10..=12)
+						&& c.parent_id == Some(kept.channel)
+						&& c.guild == Some(kept.guild)
+				})
+			})
+			.map_or(&[], |kept| &kept.rows)
 	}
 	pub fn member_slot(&self, index: usize) -> Option<&MemberSlot> {
 		let list = self.members.as_ref()?;
@@ -3724,6 +3774,7 @@ impl State {
 				self.voice.dm_ringing.clear();
 				self.voice.ring_error = None;
 				self.members = None;
+				self.parent_members = None;
 				self.member_search = Default::default();
 				self.clear_profile();
 				self.profile_cache.clear();
@@ -4243,6 +4294,7 @@ impl State {
 				);
 				self.member_search = Default::default();
 				self.members = None;
+				self.parent_members = None;
 				self.timeline.clear();
 				self.freshness = Freshness::Stale;
 				self.cancel_history();

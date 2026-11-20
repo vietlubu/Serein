@@ -1343,7 +1343,10 @@ the existing 32-item/16-KiB ceiling including unused deque slots. Observed badge
 
 Rich presence stays in RAM: up to four activities per user, each name/details/state field
 128 characters / 512 bytes. Custom status retains its separate 128-character / 512-byte limit.
-Active member rows share the existing 128 KiB pane budget. Known DM recipients additionally
+Active member rows share the existing 128 KiB pane budget. When a fresh server-channel list
+closes, its person rows (already within that budget, ≤200) stay in RAM as one extra set so that
+channel's threads can suggest its members; a later fresh server-channel list replaces them, and
+session reset or logout discards them. Known DM recipients additionally
 use a FIFO cache of at most 256 records / 512 KiB including vector storage and owned strings.
 Gateway updates coalesce for 100 ms, at most 100 users / 128 KiB per batch. Initial friends are
 filtered to the first 256 known DM recipient IDs and emitted in bounded batches. Unknown users

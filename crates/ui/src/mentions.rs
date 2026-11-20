@@ -221,6 +221,14 @@ pub(super) fn known_users_with_search(
 			add(&member.user);
 		}
 	}
+	if let Some(pane) = state.thread_pane().filter(|pane| pane.thread == channel) {
+		for message in pane.messages.iter().rev() {
+			add(&message.author);
+			for user in &message.mentions {
+				add(user);
+			}
+		}
+	}
 	for message in state.timeline.iter().rev() {
 		if message.channel == channel {
 			add(&message.author);
@@ -228,6 +236,10 @@ pub(super) fn known_users_with_search(
 				add(user);
 			}
 		}
+	}
+	// Last, so the cap never crowds out the thread's own participants.
+	for member in state.parent_members(channel) {
+		add(&member.user);
 	}
 
 	users
@@ -281,6 +293,12 @@ fn member(state: &State, channel: Id, id: Id) -> Option<&model::Member> {
 					model::MemberSlot::Person(m) => Some(m),
 					_ => None,
 				})
+				.find(|member| member.user.id == id)
+		})
+		.or_else(|| {
+			state
+				.parent_members(channel)
+				.iter()
 				.find(|member| member.user.id == id)
 		})
 }
