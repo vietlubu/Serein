@@ -8,6 +8,10 @@ struct Request {
 	/// The message the thread hangs off, when it was started from one.
 	message: Option<Id>,
 	name: String,
+	/// Starts a private thread (type 12); only offered when not starting from a message.
+	private: bool,
+	/// Optional opening message sent into the new thread once it opens.
+	content: String,
 	submitted: bool,
 }
 
@@ -50,6 +54,8 @@ impl ThreadCreateUi {
 			channel,
 			message,
 			name: name.chars().take(100).collect(),
+			private: false,
+			content: String::new(),
 			submitted: false,
 		});
 	}
@@ -84,11 +90,20 @@ impl ThreadCreateUi {
 				})
 				.map(|c| c.id)
 				.max();
+			let content = std::mem::take(&mut request.content);
 			self.request = None;
-			if let Some(id) = created
-				&& let Some(command) = state.select(id)
-			{
-				commands.push(command);
+			if let Some(id) = created {
+				commands.extend(state.select(id));
+				let text = content.trim();
+				if !text.is_empty() {
+					match state.prepare_text_send_to(id, text) {
+						Some(command) => commands.push(command),
+						// Send refused (permission/slowmode/budget): keep the text in the thread composer.
+						None => {
+							state.drafts.insert(id, text.to_owned());
+						}
+					}
+				}
 			}
 			return;
 		}
@@ -100,6 +115,8 @@ impl ThreadCreateUi {
 		.subtitle(crate::i18n::translate_if_key(
 			if request.message.is_some() {
 				"thread-create-show-the-selected-message-starts-the-thread-everyone-who-can-see"
+			} else if request.private {
+				"thread-create-show-private-hint"
 			} else {
 				"thread-create-show-everyone-who-can-see-this-channel-can-see-the-thread"
 			},
@@ -116,6 +133,30 @@ impl ThreadCreateUi {
 				)
 				.labelled_by(label.id);
 				request.name.shrink_to_fit();
+				if request.message.is_none() && state.can_create_private_thread(channel) {
+					dialog::label(ui, "thread-create-show-private-thread");
+					ui.checkbox(
+						&mut request.private,
+						crate::i18n::translate("thread-create-show-private-hint"),
+					);
+				} else {
+					request.private = false;
+				}
+				let label = dialog::label(ui, "thread-create-show-message");
+				dialog::input(
+					ui,
+					egui::TextEdit::multiline(&mut request.content)
+						.hint_text(crate::i18n::translate(
+							"thread-create-show-enter-a-message-to-start-the-conversation",
+						))
+						.char_limit(
+							client_core::MAX_CONTENT + model::message_options::PREFIX_ALLOWANCE,
+						)
+						.desired_rows(3)
+						.desired_width(f32::INFINITY),
+				)
+				.labelled_by(label.id);
+				request.content.shrink_to_fit();
 				if let Some(error) = state
 					.channel_action_status(channel)
 					.filter(|_| !state.channel_action_succeeded(channel))
@@ -135,6 +176,7 @@ impl ThreadCreateUi {
 							let action = Action::CreateThread {
 								name: request.name.trim().to_owned(),
 								message: request.message,
+								private: request.private && request.message.is_none(),
 							};
 							if let Some(command) = state.request_channel_action(channel, action) {
 								commands.push(command);

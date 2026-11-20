@@ -6,7 +6,8 @@ use crate::{
 use model::{
 	Id, Patch,
 	permissions::{
-		CREATE_PUBLIC_THREADS, MANAGE_CHANNELS, MANAGE_ROLES, MANAGE_THREADS, VIEW_CHANNEL,
+		CREATE_PRIVATE_THREADS, CREATE_PUBLIC_THREADS, MANAGE_CHANNELS, MANAGE_ROLES,
+		MANAGE_THREADS, VIEW_CHANNEL,
 	},
 };
 
@@ -175,10 +176,12 @@ pub enum Action {
 		name: String,
 		kind: CreateKind,
 	},
-	/// Start a thread in this channel, optionally from one of its messages.
+	/// Start a thread in this channel, optionally from one of its messages. Private threads
+	/// (type 12) only start from the channel itself.
 	CreateThread {
 		name: String,
 		message: Option<Id>,
+		private: bool,
 	},
 	CreateCategory {
 		name: String,
@@ -214,8 +217,15 @@ impl Action {
 			| Self::Duplicate { name }
 			| Self::Create { name, .. }
 			| Self::CreateCategory { name } => valid_name(name) && name.capacity() <= 400,
-			Self::CreateThread { name, message } => {
-				valid_name(name) && name.capacity() <= 400 && message.is_none_or(|id| id.0 != 0)
+			Self::CreateThread {
+				name,
+				message,
+				private,
+			} => {
+				valid_name(name)
+					&& name.capacity() <= 400
+					&& message.is_none_or(|id| id.0 != 0)
+					&& !(*private && message.is_some())
 			}
 			Self::Mute(Mute::For(seconds)) | Self::PostMute(Mute::For(seconds)) => {
 				matches!(seconds, 900 | 3600 | 10800 | 28800 | 86400)
@@ -348,6 +358,12 @@ impl State {
 		self.channel(channel)
 			.is_some_and(|c| c.guild.is_some() && matches!(c.kind, 0 | 5))
 			&& self.permission(channel, VIEW_CHANNEL | CREATE_PUBLIC_THREADS) == Some(true)
+	}
+	/// Whether a private thread may be started in `channel`; announcement channels have none.
+	pub fn can_create_private_thread(&self, channel: Id) -> bool {
+		self.channel(channel)
+			.is_some_and(|c| c.guild.is_some() && c.kind == 0)
+			&& self.permission(channel, VIEW_CHANNEL | CREATE_PRIVATE_THREADS) == Some(true)
 	}
 	pub fn can_manage_channel(&self, channel: Id) -> bool {
 		self.channel(channel)
@@ -624,11 +640,16 @@ impl State {
 							})
 					}
 					Action::PostRename(_) => self.can_edit_post(channel),
-					Action::CreateThread { message, .. } => {
-						self.can_create_thread(channel)
-							&& message.is_none_or(|id| {
-								self.timeline.get(id).is_some_and(|m| m.channel == channel)
-							})
+					Action::CreateThread {
+						message, private, ..
+					} => {
+						(if *private {
+							self.can_create_private_thread(channel)
+						} else {
+							self.can_create_thread(channel)
+						}) && message.is_none_or(|id| {
+							self.timeline.get(id).is_some_and(|m| m.channel == channel)
+						})
 					}
 					Action::PostPin(_) | Action::PostLock(_) => self.can_manage_post(channel),
 					Action::PostMute(_) | Action::PostNotifications(_) => {
@@ -934,9 +955,16 @@ impl State {
 						&& match &action {
 							Action::Create { kind, .. } => c.kind == kind.wire_kind(),
 							Action::CreateCategory { .. } => c.kind == 4,
-							Action::CreateThread { name, message } => {
-								matches!(c.kind, 10..=12)
-									&& c.parent_id == Some(channel)
+							Action::CreateThread {
+								name,
+								message,
+								private,
+							} => {
+								(if *private {
+									c.kind == 12
+								} else {
+									matches!(c.kind, 10 | 11)
+								}) && c.parent_id == Some(channel)
 									&& (c.name.trim() == name.trim()
 										|| message.is_some_and(|m| c.id == m))
 							}
@@ -1095,8 +1123,12 @@ impl State {
 				if self.guild(guild).is_some()
 					&& (if reference {
 						true
-					} else if matches!(action, Action::CreateThread { .. }) {
-						self.can_create_thread(channel)
+					} else if let Action::CreateThread { private, .. } = &action {
+						if *private {
+							self.can_create_private_thread(channel)
+						} else {
+							self.can_create_thread(channel)
+						}
 					} else if creating {
 						self.can_manage_channel(channel)
 					} else {
@@ -2241,6 +2273,7 @@ mod tests {
 		let action = Action::CreateThread {
 			name: "User Typed Name".into(),
 			message: Some(Id(42)),
+			private: false,
 		};
 		let command = state.request_channel_action(Id(3), action).unwrap();
 		let mut existing = state.channels[0].clone();
@@ -2280,6 +2313,7 @@ mod tests {
 		let action = Action::CreateThread {
 			name: "Creation Time Name".into(),
 			message: Some(Id(42)),
+			private: false,
 		};
 		let command = state.request_channel_action(Id(3), action).unwrap();
 
@@ -2297,6 +2331,44 @@ mod tests {
 			}),
 		);
 		assert_eq!(state.channel(Id(42)).unwrap().name, "Renamed via Gateway");
+		assert!(state.channel_action_succeeded(Id(3)));
+	}
+
+	#[test]
+	fn private_thread_requests_reject_starters_and_public_outcomes() {
+		let mut state = state();
+		let mut starter = crate::tests::message(42);
+		starter.channel = Id(3);
+		state.timeline.insert(starter, false, false).unwrap();
+		let private = |message| Action::CreateThread {
+			name: "Secret".into(),
+			message,
+			private: true,
+		};
+		assert!(
+			state
+				.request_channel_action(Id(3), private(Some(Id(42))))
+				.is_none()
+		);
+		let thread = |kind| {
+			let mut thread = state.channels[0].clone();
+			thread.id = Id(50);
+			thread.parent_id = Some(Id(3));
+			thread.kind = kind;
+			thread.name = "Secret".into();
+			Ok(Outcome::Channel {
+				channel: Box::new(thread),
+				permissions: None,
+			})
+		};
+		let (public, secret) = (thread(11), thread(12));
+		let command = state.request_channel_action(Id(3), private(None)).unwrap();
+		finish(&mut state, command, public);
+		assert!(state.channel(Id(50)).is_none());
+		assert!(!state.channel_action_succeeded(Id(3)));
+		let command = state.request_channel_action(Id(3), private(None)).unwrap();
+		finish(&mut state, command, secret);
+		assert_eq!(state.channel(Id(50)).map(|c| c.kind), Some(12));
 		assert!(state.channel_action_succeeded(Id(3)));
 	}
 }

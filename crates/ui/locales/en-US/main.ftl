@@ -3980,7 +3980,15 @@ thread-create-show-create = Create
 # Context: show
 thread-create-show-create-thread = Create Thread
 # Context: show
+thread-create-show-enter-a-message-to-start-the-conversation = Enter a message to start the conversation!
+# Context: show
 thread-create-show-everyone-who-can-see-this-channel-can-see-the-thread = Everyone who can see this channel can see the thread.
+# Context: show
+thread-create-show-message = Message
+# Context: show
+thread-create-show-private-hint = Only people you invite and moderators can see
+# Context: show
+thread-create-show-private-thread = Private Thread
 # Context: show
 thread-create-show-the-selected-message-starts-the-thread-everyone-who-can-see = The selected message starts the thread. Everyone who can see this channel can see the thread.
 # Context: show

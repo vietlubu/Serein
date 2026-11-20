@@ -3854,7 +3854,15 @@ thread-create-show-create = Создавать
 # Context: show
 thread-create-show-create-thread = Создать тему
 # Context: show
+thread-create-show-enter-a-message-to-start-the-conversation = Введите сообщение, чтобы начать разговор!
+# Context: show
 thread-create-show-everyone-who-can-see-this-channel-can-see-the-thread = Все, кто видит этот канал, могут видеть ветку.
+# Context: show
+thread-create-show-message = Сообщение
+# Context: show
+thread-create-show-private-hint = Видят только приглашённые вами участники и модераторы
+# Context: show
+thread-create-show-private-thread = Приватная ветка
 # Context: show
 thread-create-show-the-selected-message-starts-the-thread-everyone-who-can-see = Выбранное сообщение запускает цепочку. Все, кто видит этот канал, могут видеть ветку.
 # Context: show

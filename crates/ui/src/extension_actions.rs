@@ -390,7 +390,14 @@ impl MessagingUi {
 			} => {
 				let channel = selected_channel(state, &channel_id)?;
 				let message = message_id.as_deref().map(id).transpose()?;
-				state.request_channel_action(channel, Action::CreateThread { name, message })
+				state.request_channel_action(
+					channel,
+					Action::CreateThread {
+						name,
+						message,
+						private: false,
+					},
+				)
 			}
 			AppAction::CreateForumPost {
 				parent_id,
@@ -798,7 +805,7 @@ mod tests {
 		view.apply_extension_app_action(&mut state, create(), &mut commands)
 			.unwrap();
 		assert!(
-			matches!(&commands[0], Command::ChannelAction { channel: Id(20), action: Action::CreateThread { name, message: None }, .. } if name == "Approved thread")
+			matches!(&commands[0], Command::ChannelAction { channel: Id(20), action: Action::CreateThread { name, message: None, private: false }, .. } if name == "Approved thread")
 		);
 		assert!(
 			view.apply_extension_app_action(&mut state, create(), &mut commands)

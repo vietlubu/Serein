@@ -3851,7 +3851,15 @@ thread-create-show-create = Créer
 # Context: show
 thread-create-show-create-thread = Créer un fil de discussion
 # Context: show
+thread-create-show-enter-a-message-to-start-the-conversation = Écris un message pour lancer la conversation !
+# Context: show
 thread-create-show-everyone-who-can-see-this-channel-can-see-the-thread = Tous ceux qui peuvent voir cette chaîne peuvent voir le fil de discussion.
+# Context: show
+thread-create-show-message = Message
+# Context: show
+thread-create-show-private-hint = Seuls les personnes que tu invites et les modérateurs peuvent le voir
+# Context: show
+thread-create-show-private-thread = Fil privé
 # Context: show
 thread-create-show-the-selected-message-starts-the-thread-everyone-who-can-see = Le message sélectionné démarre le fil de discussion. Tous ceux qui peuvent voir cette chaîne peuvent voir le fil de discussion.
 # Context: show

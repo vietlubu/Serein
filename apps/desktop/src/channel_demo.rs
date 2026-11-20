@@ -94,11 +94,11 @@ pub fn execute(
 				}
 			}
 			Action::Delete => Outcome::Deleted,
-			Action::CreateThread { name, .. } => {
+			Action::CreateThread { name, private, .. } => {
 				*next_id += 1;
 				let mut thread = source.clone();
 				thread.id = Id(*next_id);
-				thread.kind = 11;
+				thread.kind = if private { 12 } else { 11 };
 				thread.parent_id = Some(source.id);
 				thread.name = name;
 				thread.last_message = None;
@@ -317,6 +317,7 @@ mod tests {
 				Action::CreateThread {
 					name: "Synthetic thread".into(),
 					message: Some(starter),
+					private: false,
 				},
 			)
 			.expect("a thread may be started here")

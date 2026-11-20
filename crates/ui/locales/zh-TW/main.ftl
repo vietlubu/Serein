@@ -3882,7 +3882,15 @@ thread-create-show-create = 建立
 # Context: show
 thread-create-show-create-thread = 建立討論串
 # Context: show
+thread-create-show-enter-a-message-to-start-the-conversation = 輸入訊息，開始對話吧！
+# Context: show
 thread-create-show-everyone-who-can-see-this-channel-can-see-the-thread = 看得到這個頻道的人，都看得到這個討論串。
+# Context: show
+thread-create-show-message = 訊息
+# Context: show
+thread-create-show-private-hint = 只有你邀請的人和版主可以看到
+# Context: show
+thread-create-show-private-thread = 私人討論串
 # Context: show
 thread-create-show-the-selected-message-starts-the-thread-everyone-who-can-see = 以所選訊息作為討論串開頭。看得到這個頻道的人，都看得到這個討論串。
 # Context: show

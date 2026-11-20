@@ -3851,7 +3851,15 @@ thread-create-show-create = Erstellen
 # Context: show
 thread-create-show-create-thread = Thread erstellen
 # Context: show
+thread-create-show-enter-a-message-to-start-the-conversation = Gib eine Nachricht ein, um die Unterhaltung zu beginnen!
+# Context: show
 thread-create-show-everyone-who-can-see-this-channel-can-see-the-thread = Jeder, der diesen Kanal sehen kann, kann den Thread sehen.
+# Context: show
+thread-create-show-message = Nachricht
+# Context: show
+thread-create-show-private-hint = Nur eingeladene Personen und Moderatoren können ihn sehen
+# Context: show
+thread-create-show-private-thread = Privater Thread
 # Context: show
 thread-create-show-the-selected-message-starts-the-thread-everyone-who-can-see = Die ausgewählte Nachricht startet den Thread. Jeder, der diesen Kanal sehen kann, kann den Thread sehen.
 # Context: show
