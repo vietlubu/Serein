@@ -4338,13 +4338,23 @@ impl TimelineView {
 										);
 										ui.painter().rect_filled(rail, 2.0, colors.selected);
 									}
-									// Thread starters and "started a thread" rows both carry the thread card.
+									// Thread starters and "started a thread" rows both carry the thread card, but a row whose
+									// starter message is shown leaves the card to that message, as Discord does.
 									if (system.is_none() || message.kind == 18)
 										&& let Some(thread) = state
 											.thread_of(message)
 											.map(|thread| thread.id)
 											.or_else(|| state.unloaded_thread(message))
-									{
+										&& !(message.kind == 18
+											&& state.timeline.get_display(thread).is_some_and(
+												|starter| {
+													starter.flags & model::HAS_THREAD != 0
+														&& !(self.hidden_blocked
+															&& state
+																.user_blocked(starter.author.id)
+																== Some(true))
+												},
+											)) {
 										// The name and count come from the thread's channel; its
 										// latest message only exists once the bounded read lands.
 										let channel = state.channel(thread);
@@ -7453,7 +7463,11 @@ mod tests {
 		starter.content = "The private thread starter".into();
 		let starter_id = starter.id;
 		let ordinary = test_support::message(thread.0 + 1, parent);
-		for message in [starter, ordinary] {
+		let mut started = test_support::message(thread.0 + 3, parent);
+		started.kind = 18;
+		started.content = String::new();
+		started.thread = Some(thread);
+		for message in [starter, ordinary, started] {
 			state.timeline.insert(message, false, false).unwrap();
 		}
 		state.history_pending = false;
@@ -7548,6 +7562,7 @@ mod tests {
 		painted.clear();
 		let mut accessible = Vec::new();
 		for _ in 0..2 {
+			painted.clear();
 			let output = ctx.run_ui(
 				egui::RawInput {
 					screen_rect: Some(egui::Rect::from_min_size(
@@ -7595,6 +7610,14 @@ mod tests {
 				"missing {label}: {painted:?}"
 			);
 		}
+		assert_eq!(
+			painted
+				.iter()
+				.filter(|text| *text == "The latest reply in this thread")
+				.count(),
+			1,
+			"a type-18 row leaves the card to its loaded starter: {painted:?}"
+		);
 		// Painted text has no accessible node of its own, so the card names every part.
 		assert!(
 			accessible.iter().any(|label| {
