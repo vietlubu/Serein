@@ -4182,8 +4182,7 @@ impl Desktop {
 						} => {
 							let mut reactions = self
 								.state
-								.timeline
-								.get(message)
+								.message(message)
 								.and_then(|m| m.reactions.clone())
 								.unwrap_or_default();
 							if let Some(r) = reactions.iter_mut().find(|r| r.emoji.same(&emoji)) {
@@ -4205,7 +4204,7 @@ impl Desktop {
 							}
 							reactions.retain(|r| r.count > 0);
 							self.state.reactions.reset();
-							let _ = self.state.timeline.set_reactions(message, Some(reactions));
+							let _ = self.state.set_message_reactions(message, Some(reactions));
 							// The fixture has no service readback; it updates synthetic RAM only.
 							E::Written {
 								channel,
@@ -4760,8 +4759,7 @@ impl Desktop {
 				} => {
 					let result = self
 						.state
-						.timeline
-						.get(message)
+						.message(message)
 						.cloned()
 						.ok_or(Failure::Protocol)
 						.map(|mut updated| {

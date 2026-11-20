@@ -3922,8 +3922,6 @@ thread-pane-empty = 이 스레드에는 아직 메시지가 없어요.
 thread-pane-failed = 이 스레드를 불러오지 못했어요.
 # Context: show
 thread-pane-loading = 스레드를 불러오는 중…
-# Context: content
-thread-pane-media = 첨부 파일: { $count }
 # Context: show
 thread-pane-message-hint = “{ $thread }”에 메시지 보내기
 # Context: show

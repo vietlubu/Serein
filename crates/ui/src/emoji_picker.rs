@@ -711,24 +711,21 @@ impl Picker {
 		avatars: &mut Avatars,
 		commands: &mut Vec<Command>,
 	) {
-		let Some(channel) = state.selected else {
+		let Some(selected) = state.selected else {
 			self.open = false;
 			return;
 		};
-		self.sync(state, Some(channel));
+		self.sync(state, Some(selected));
 		let Some((Target::React(message), anchor, trigger_id)) =
 			self.reaction.filter(|_| self.open)
 		else {
 			return;
 		};
-		if !state
-			.timeline
-			.get(message)
-			.is_some_and(|m| m.channel == channel)
-		{
+		// The message may live in the peeked thread beside the selected channel.
+		let Some(channel) = state.message(message).map(|m| m.channel) else {
 			self.open = false;
 			return;
-		}
+		};
 		let trigger = ui.interact(anchor, trigger_id, egui::Sense::hover());
 		// The real trigger is the hover-toolbar button, which is not registered while the
 		// popout covers the message row. Keep a node for the id focus is returned to, or

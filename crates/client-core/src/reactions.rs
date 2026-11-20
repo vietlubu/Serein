@@ -133,10 +133,10 @@ impl State {
 		{
 			return None;
 		}
-		let channel = self.selected?;
-		let source = self.timeline.get(message)?;
-		if !self.can_read_history(channel)
-			|| source.channel != channel
+		let source = self.message(message)?;
+		let channel = source.channel;
+		if !self.showing(channel)
+			|| !self.can_read_history(channel)
 			|| !source
 				.reactions
 				.as_ref()?
@@ -208,7 +208,7 @@ impl State {
 		{
 			self.reactions.users = None;
 		}
-		if self.selected != Some(channel)
+		if !self.showing(channel)
 			|| !self.can_view(channel)
 			|| self.freshness == Freshness::Unavailable
 			|| !self.gateway_connected
@@ -221,8 +221,7 @@ impl State {
 			.as_ref()
 			.filter(|(id, _, _)| *id == message);
 		let known = self
-			.timeline
-			.get(message)
+			.message(message)
 			.and_then(|m| m.reactions.as_ref())
 			.or_else(|| preview.map(|(_, before, _)| before));
 		let Some(mut values) = known.cloned() else {
@@ -241,7 +240,7 @@ impl State {
 		if !self.queue_reaction_read(message) {
 			return Ok(());
 		}
-		self.timeline.set_reactions(message, Some(values))?;
+		self.set_message_reactions(message, Some(values))?;
 		if let Some(preview) = preview {
 			self.reactions.preview = Some(preview);
 		}
@@ -250,12 +249,12 @@ impl State {
 	}
 	pub fn refresh_reactions(&mut self, message: Id) {
 		if self.queue_reaction_read(message) {
-			let _ = self.timeline.set_reactions(message, None);
+			let _ = self.set_message_reactions(message, None);
 			self.revision += 1;
 		}
 	}
 	pub(super) fn queue_reaction_read(&mut self, message: Id) -> bool {
-		if self.timeline.get(message).is_none() && !self.history_pending {
+		if self.message(message).is_none() && !self.history_pending {
 			return false;
 		}
 		if self.reactions.dirty.len() >= session_cache::MAX_MUTATIONS
@@ -273,7 +272,7 @@ impl State {
 				.reactions
 				.preview
 				.as_ref()
-				.is_some_and(|(id, _, _)| self.timeline.get(*id).is_none())
+				.is_some_and(|(id, _, _)| self.message(*id).is_none())
 		{
 			self.reactions.preview = None;
 		}
@@ -286,14 +285,15 @@ impl State {
 		{
 			return None;
 		}
-		let channel = self.selected?;
-		if !self.can_read_history(channel) {
-			return None;
-		}
-		self.reactions
-			.dirty
-			.retain(|id| self.timeline.get(*id).is_some());
-		let message = self.reactions.dirty.pop_first()?;
+		let mut dirty = std::mem::take(&mut self.reactions.dirty);
+		dirty.retain(|id| self.message(*id).is_some());
+		self.reactions.dirty = dirty;
+		let (message, channel) = self.reactions.dirty.iter().find_map(|id| {
+			self.message(*id)
+				.filter(|m| self.can_read_history(m.channel))
+				.map(|m| (*id, m.channel))
+		})?;
+		self.reactions.dirty.remove(&message);
 		self.reactions.sequence = self.reactions.sequence.wrapping_add(1);
 		let request = self.reactions.sequence;
 		self.reactions.read = Some((message, request));
@@ -322,8 +322,7 @@ impl State {
 			return Err(UNAVAILABLE);
 		}
 		let reactions = self
-			.timeline
-			.get(message)
+			.message(message)
 			.and_then(|message| message.reactions.as_ref())
 			.ok_or(UNAVAILABLE)?;
 		if reactions
@@ -352,11 +351,12 @@ impl State {
 		{
 			return None;
 		}
-		let channel = self.selected?;
 		if self.timeline.is_deleted(message) {
 			return None;
 		}
-		let reactions = self.timeline.get(message)?.reactions.as_ref()?;
+		let source = self.message(message)?;
+		let channel = source.channel;
+		let reactions = source.reactions.clone()?;
 		let existing = reactions.iter().find(|r| r.emoji.same(&emoji));
 		if existing.is_none() && reactions.len() >= model::MAX_REACTIONS {
 			self.status = "Reaction limit reached";
@@ -366,7 +366,7 @@ impl State {
 		if !self.can_react(message, Some(&emoji), add) {
 			return None;
 		}
-		let before = reactions.clone();
+		let before = reactions;
 		let mut after = before.clone();
 		if let Some(reaction) = after.iter_mut().find(|r| r.emoji.same(&emoji)) {
 			reaction.count = if add {
@@ -430,7 +430,7 @@ impl State {
 				})?;
 			}
 			Event::Changed { channel, message } => {
-				if self.selected == Some(channel)
+				if self.showing(channel)
 					&& self.can_view(channel)
 					&& self.freshness != Freshness::Unavailable
 					&& self.gateway_connected
@@ -444,12 +444,12 @@ impl State {
 				request,
 				result,
 			} => {
-				if self.selected != Some(channel) || self.reactions.read != Some((message, request))
-				{
+				if self.reactions.read != Some((message, request)) {
 					return Ok(());
 				}
 				self.reactions.read = None;
-				if !self.gateway_connected
+				if !self.showing(channel)
+					|| !self.gateway_connected
 					|| self.freshness == Freshness::Unavailable
 					|| !self.can_read_history(channel)
 				{
@@ -457,7 +457,7 @@ impl State {
 				}
 				match result {
 					Ok(reactions) if !self.reactions.dirty.contains(&message) => {
-						self.timeline.set_reactions(message, Some(reactions))?;
+						self.set_message_reactions(message, Some(reactions))?;
 						if self
 							.reactions
 							.preview
@@ -476,18 +476,15 @@ impl State {
 							.is_some_and(|(id, _, _)| *id == message)
 							&& let Some((_, _, after)) = self.reactions.preview.take()
 						{
-							self.timeline.set_reactions(message, Some(after))?;
+							self.set_message_reactions(message, Some(after))?;
 						}
 						self.reactions.dirty.remove(&message); // No retry storm on a rejected read.
-						self.status = if self
-							.timeline
-							.get(message)
-							.is_some_and(|m| m.reactions.is_some())
-						{
-							"Reaction counts could not be refreshed; reload the conversation to retry"
-						} else {
-							"Reactions unavailable; use Reload reactions to retry"
-						};
+						self.status =
+							if self.message(message).is_some_and(|m| m.reactions.is_some()) {
+								"Reaction counts could not be refreshed; reload the conversation to retry"
+							} else {
+								"Reactions unavailable; use Reload reactions to retry"
+							};
 						if failure == Failure::Forbidden {
 							self.apply(crate::Envelope {
 								generation: self.generation,
@@ -501,14 +498,12 @@ impl State {
 				}
 			}
 			Event::Written {
-				channel,
+				channel: _,
 				message,
 				request,
 				result,
 			} => {
-				if self.selected != Some(channel)
-					|| self.reactions.writing != Some((message, request))
-				{
+				if self.reactions.writing != Some((message, request)) {
 					return Ok(());
 				}
 				self.reactions.writing = None;
@@ -523,12 +518,9 @@ impl State {
 							self.refresh_reactions(message);
 						}
 						if let Some(before) = before
-							&& self
-								.timeline
-								.get(message)
-								.is_some_and(|m| m.reactions.is_none())
+							&& self.message(message).is_some_and(|m| m.reactions.is_none())
 						{
-							self.timeline.set_reactions(message, Some(before))?;
+							self.set_message_reactions(message, Some(before))?;
 						}
 						self.revision += 1;
 						self.status = failure.label();

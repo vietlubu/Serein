@@ -3967,8 +3967,6 @@ thread-pane-empty = There are no messages in this thread yet.
 thread-pane-failed = This thread couldn't be loaded.
 # Context: show
 thread-pane-loading = Loading thread…
-# Context: content
-thread-pane-media = Attachments: { $count }
 # Context: show
 thread-pane-message-hint = Message “{ $thread }”
 # Context: show

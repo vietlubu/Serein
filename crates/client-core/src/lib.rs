@@ -2018,9 +2018,9 @@ impl State {
 		content: &str,
 		mention: bool,
 	) -> Option<Command> {
-		let channel = self.selected?;
-		let message = self.timeline.get(target)?;
-		if message.channel != channel || message.ephemeral || !self.accepts_reply_source(message) {
+		let message = self.message(target)?;
+		let channel = message.channel;
+		if !self.showing(channel) || message.ephemeral || !self.accepts_reply_source(message) {
 			self.status = "This message is unavailable for replies";
 			return None;
 		}
@@ -3978,17 +3978,14 @@ impl State {
 				};
 				self.observe_notification(&m);
 				self.observe_last_message(m.channel, m.id);
-				if self.selected == Some(m.channel)
+				if self.showing(m.channel)
 					&& self.reactions.invalidated(m.id)
 					&& m.reactions.is_some()
 				{
 					self.queue_reaction_read(m.id);
 				}
 				if self.reactions.invalidated(m.id) {
-					m.reactions = self
-						.timeline
-						.get(m.id)
-						.and_then(|old| old.reactions.clone());
+					m.reactions = self.message(m.id).and_then(|old| old.reactions.clone());
 				}
 				self.confirm(&m);
 				self.observe_thread_pane_message(&m);
@@ -4008,7 +4005,7 @@ impl State {
 			}
 			Event::Patch(mut p) => {
 				if !matches!(p.content, Patch::Absent)
-					&& self.timeline.get(p.id).is_some_and(
+					&& self.message(p.id).is_some_and(
 						|old| !matches!(p.edited, Patch::Value(at) if old.edited_at.is_some_and(|old| at < old)),
 					) {
 					self.message_actions.observe_content(p.channel, p.id);
@@ -4017,7 +4014,7 @@ impl State {
 				if !matches!(p.content, Patch::Absent) || !matches!(p.edited, Patch::Absent) {
 					self.thread_previews.mark_stale(p.channel, p.id);
 				}
-				if self.selected == Some(p.channel)
+				if self.showing(p.channel)
 					&& self.reactions.invalidated(p.id)
 					&& !matches!(p.reactions, Patch::Absent)
 				{
@@ -4026,6 +4023,8 @@ impl State {
 				if self.reactions.invalidated(p.id) {
 					p.reactions = Patch::Absent;
 				}
+				// A peek copy over the bounds keeps its old content; it never invalidates the parent.
+				let _ = self.patch_thread_pane(&p);
 				if self.selected == Some(p.channel)
 					&& self.can_view(p.channel)
 					&& self.freshness != Freshness::Unavailable

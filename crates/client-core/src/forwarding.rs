@@ -6,8 +6,8 @@ impl State {
 	pub fn can_forward(&self, message: Id) -> bool {
 		self.auth == AuthState::Authenticated
 			&& self.gateway_connected
-			&& self.timeline.get(message).is_some_and(|m| {
-				self.selected == Some(m.channel)
+			&& self.message(message).is_some_and(|m| {
+				self.showing(m.channel)
 					&& self.can_read_history(m.channel)
 					&& matches!(m.kind, 0 | 19 | 20 | 23)
 					&& !m.ephemeral && !m.unsupported
@@ -32,7 +32,10 @@ impl State {
 			self.status = "Forward unavailable: check destinations, connection and message limits";
 			return Vec::new();
 		}
-		let source = self.timeline.get(message).unwrap().channel;
+		let source = self
+			.message(message)
+			.expect("checked by can_forward")
+			.channel;
 		let guild = self.channel(source).and_then(|c| c.guild);
 		let mut commands = Vec::with_capacity(count);
 		for &channel in targets {
