@@ -76,3 +76,7 @@ The 14 display-name faces total **3,493,132 bytes (3.33 MiB)**, asserted below 4
 ## Icons
 
 `icons/atlas.png` (38,534 bytes, 512×320 RGBA) bundles 37 [Phosphor Icons](https://github.com/phosphor-icons/core) 2.1.1 glyphs under the MIT license; see [icons/README.md](icons/README.md) for the pinned sources, hashes and the `resvg` regeneration command.
+
+## omp logo
+
+`omp/omp-128.png` (5,233 bytes, 128×128 RGBA) is the avatar of local `/summary` rows. It is [`packages/collab-web/public/favicon.png`](https://github.com/can1357/oh-my-pi/blob/17e663b73667941db39271d90528a05c9c1e5f4b/packages/collab-web/public/favicon.png) from oh-my-pi at commit `17e663b7` (256×256, 6,987 bytes, SHA-256 `36b1bfb9ab058ce3e982aca7f6cd36e042deed81a626b2fc402486512b8f219c`), downscaled to 128 px with `sips -z 128 128` because avatar textures are capped at 128 px. MIT license; see [omp/LICENSE](omp/LICENSE).

@@ -2970,7 +2970,7 @@ impl Desktop {
 			self.summary = Some((
 				loaded.channel,
 				loaded.request,
-				summary::spawn(transcript, ctx.clone()),
+				summary::spawn(transcript, loaded.instruction, ctx.clone()),
 			));
 		}
 		let Some((channel, request, receiver)) = &self.summary else {
