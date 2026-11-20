@@ -1355,6 +1355,7 @@ fn display_rows<'a>(
 		.interactions
 		.ephemeral
 		.iter()
+		.chain(state.summary_replies())
 		.filter(|message| Some(message.channel) == state.selected)
 		.collect();
 	private.sort_by_key(|message| message.id);
@@ -1376,6 +1377,7 @@ fn display_message(state: &State, id: Id) -> Option<&Message> {
 			.interactions
 			.ephemeral
 			.iter()
+			.chain(state.summary_replies())
 			.find(|message| message.id == id && Some(message.channel) == state.selected)
 	})
 }

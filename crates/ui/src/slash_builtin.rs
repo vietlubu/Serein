@@ -69,7 +69,7 @@ pub(super) const ALL: &[Descriptor] = &[
 		command: Builtin::Summary,
 		name: "summary",
 		description: "Privately summarize recent messages with omp.",
-		usage: "/summary [count]",
+		usage: "/summary [count] [instruction]",
 	},
 	Descriptor {
 		command: Builtin::Tableflip,
@@ -97,7 +97,7 @@ pub(super) enum Action<'a> {
 	Gifs(&'a str),
 	Stickers(&'a str),
 	Message { recipient: &'a str, text: &'a str },
-	Summary(u16),
+	Summary { count: u16, instruction: &'a str },
 }
 
 /// Completion is only active for the leading command token, never inline text.
@@ -134,14 +134,23 @@ impl<'a> Invocation<'a> {
 			Builtin::Gif => return Ok(Action::Gifs(text)),
 			Builtin::Sticker => return Ok(Action::Stickers(text)),
 			Builtin::Summary => {
-				return match text.trim() {
-					"" => Ok(Action::Summary(client_core::summary::DEFAULT_COUNT)),
-					count => count
+				// A leading all-digit word is the count; any other text is the instruction.
+				let (first, rest) = split_word(text.trim());
+				return if !first.is_empty() && first.bytes().all(|b| b.is_ascii_digit()) {
+					first
 						.parse()
 						.ok()
 						.filter(|count| (1..=client_core::summary::MAX_COUNT).contains(count))
-						.map(Action::Summary)
-						.ok_or("Use a number from 1 to 500: /summary [count]"),
+						.map(|count| Action::Summary {
+							count,
+							instruction: rest.trim_end(),
+						})
+						.ok_or("Use a number from 1 to 500: /summary [count] [instruction]")
+				} else {
+					Ok(Action::Summary {
+						count: client_core::summary::DEFAULT_COUNT,
+						instruction: text.trim(),
+					})
 				};
 			}
 			Builtin::Msg => {
@@ -299,13 +308,15 @@ impl crate::MessagingUi {
 				self.emoji_picker.search_stickers(query);
 				self.clear_draft(state, channel);
 			}
-			Action::Summary(count) => match state.request_summary(channel, count) {
-				Ok(command) => {
-					self.clear_draft(state, channel);
-					commands.push(command);
+			Action::Summary { count, instruction } => {
+				match state.request_summary(channel, count, instruction) {
+					Ok(command) => {
+						self.clear_draft(state, channel);
+						commands.push(command);
+					}
+					Err(error) => state.status = error,
 				}
-				Err(error) => state.status = error,
-			},
+			}
 			Action::Message {
 				recipient: query,
 				text,
@@ -463,21 +474,32 @@ mod tests {
 				text: "hello 世界"
 			})
 		);
-		assert_eq!(
-			parse("/summary").unwrap().action(),
-			Ok(Action::Summary(client_core::summary::DEFAULT_COUNT))
-		);
-		assert_eq!(
-			parse("/summary 50").unwrap().action(),
-			Ok(Action::Summary(50))
-		);
+		for (input, count, instruction) in [
+			("/summary", client_core::summary::DEFAULT_COUNT, ""),
+			("/summary 50", 50, ""),
+			(
+				"/summary 100 Hãy dùng tiếng Việt",
+				100,
+				"Hãy dùng tiếng Việt",
+			),
+			(
+				"/summary Hãy dùng tiếng Việt",
+				client_core::summary::DEFAULT_COUNT,
+				"Hãy dùng tiếng Việt",
+			),
+		] {
+			assert_eq!(
+				parse(input).unwrap().action(),
+				Ok(Action::Summary { count, instruction })
+			);
+		}
 		for input in [
 			"/me",
 			"/spoiler\n\t",
 			"/msg",
 			"/summary 0",
 			"/summary 501",
-			"/summary abc",
+			"/summary 99999",
 		] {
 			assert!(parse(input).unwrap().action().is_err());
 		}

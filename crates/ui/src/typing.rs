@@ -66,8 +66,13 @@ fn segments(state: &State, channel: Id, now: Instant) -> Option<Vec<(String, boo
 	if state.selected != Some(channel) {
 		return None;
 	}
-	let mut names = Vec::new();
-	let mut count = 0;
+	let omp = state.summary_running(channel);
+	let mut names = if omp {
+		vec!["omp".to_owned()]
+	} else {
+		Vec::new()
+	};
+	let mut count = usize::from(omp);
 	for user in state.typing_users(now) {
 		count += 1;
 		if names.len() < 3
@@ -221,10 +226,15 @@ pub(super) fn overlay(
 		let text: String = segments.iter().map(|(text, _)| text.as_str()).collect();
 		egui::WidgetInfo::labeled(egui::Role::Label, true, text)
 	});
-	if let Some(deadline) = state.typing_deadline(now) {
+	let frame = std::time::Duration::from_millis(80);
+	if state.summary_running(channel) {
+		// omp has no deadline; the worker's answer repaints and ends it.
+		if animate {
+			ui.ctx().request_repaint_after(frame);
+		}
+	} else if let Some(deadline) = state.typing_deadline(now) {
 		// Keep the dots moving until the earliest deadline, then go idle without repaints.
 		// Unfocused, only the expiry itself is worth a frame; the dots hold still until then.
-		let frame = std::time::Duration::from_millis(80);
 		let delay = deadline.saturating_duration_since(now);
 		ui.ctx()
 			.request_repaint_after(if animate { delay.min(frame) } else { delay });

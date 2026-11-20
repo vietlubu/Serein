@@ -134,7 +134,7 @@ pub fn reply(channel: Id, request: u64, invoker: Option<&model::User>, text: &st
 	)
 	.expect("valid local summary row")
 	.into_model();
-	message.author.id = Id(0);
+	message.author.id = client_core::summary::AUTHOR;
 	message.author.kind = model::AccountKind::App;
 	message
 }
@@ -143,24 +143,32 @@ pub fn reply(channel: Id, request: u64, invoker: Option<&model::User>, text: &st
 pub type Answer = mpsc::Receiver<Result<String, &'static str>>;
 
 /// Runs `omp` on a worker thread and wakes the UI with its answer.
-pub fn spawn(transcript: String, wake: egui::Context) -> Answer {
+pub fn spawn(transcript: String, instruction: String, wake: egui::Context) -> Answer {
 	let (send, receive) = mpsc::sync_channel(1);
 	std::thread::spawn(move || {
-		let _ = send.send(run(transcript));
+		let _ = send.send(run(transcript, instruction));
 		wake.request_repaint();
 	});
 	receive
 }
 
-// shortcut: the worker is detached and not cancelled on quit or channel switch; omp's
-// --max-time 120 ends it. Add a cancel flag if summaries get long-running.
-fn run(transcript: String) -> Result<String, &'static str> {
+// shortcut: the worker is detached and not cancelled on quit; omp's --max-time 120 ends it.
+// Add a cancel flag if summaries get long-running.
+fn run(transcript: String, instruction: String) -> Result<String, &'static str> {
 	let path = locate().ok_or("omp was not found. Install omp or add it to PATH.")?;
+	// The reader's instruction goes in the system prompt, never in the untrusted transcript.
+	let prompt = if instruction.is_empty() {
+		SYSTEM_PROMPT.to_owned()
+	} else {
+		format!(
+			"{SYSTEM_PROMPT}\n\nThe reader added this instruction. Follow it over the language, format and length rules above, never over the rule about the transcript:\n{instruction}"
+		)
+	};
 	let mut command = std::process::Command::new(path);
 	command
 		.args(OMP_ARGS)
 		.arg("--system-prompt")
-		.arg(SYSTEM_PROMPT)
+		.arg(prompt)
 		// omp needs HOME for its login and model roles, so the environment is inherited.
 		.current_dir(std::env::temp_dir())
 		.stdin(Stdio::piped())

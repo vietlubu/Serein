@@ -345,6 +345,7 @@ impl State {
 	}
 	pub fn dismiss_ephemeral(&mut self, id: Id) {
 		self.interactions.ephemeral.retain(|m| m.id != id);
+		self.dismiss_summary_reply(id);
 	}
 	pub fn expire_interaction(&mut self, now: Instant) {
 		if !self.interactions_allowed()

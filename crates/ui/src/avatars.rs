@@ -14,6 +14,7 @@ use std::{
 pub(crate) use media::{Quality, Surface};
 
 pub type GifFrames = Vec<(Duration, std::sync::Arc<ColorImage>)>;
+const OMP_LOGO: &[u8] = include_bytes!("../../../assets/omp/omp-128.png");
 const ANIMATIONS: usize = 128;
 const ANIMATION_BYTES: usize = 128 * 1024 * 1024;
 const ANIMATION_INTERVAL: Duration = Duration::from_millis(16);
@@ -1834,6 +1835,29 @@ impl Avatars {
 		demo: bool,
 	) {
 		if ui.is_rect_visible(rect) {
+			if user.id == client_core::summary::AUTHOR {
+				const KEY: &str = "omp-logo";
+				if !self.textures.contains_key(KEY)
+					&& !self.attempts.get(KEY).is_some_and(|(_, failed)| *failed)
+				{
+					self.attempts.insert(KEY.into(), (Instant::now(), false));
+					let image =
+						image::load_from_memory_with_format(OMP_LOGO, image::ImageFormat::Png)
+							.ok()
+							.map(|image| {
+								let image = image.into_rgba8();
+								ColorImage::from_rgba_unmultiplied(
+									[image.width() as usize, image.height() as usize],
+									&image,
+								)
+							});
+					self.accept(ui.ctx(), KEY.into(), image);
+				}
+				if !self.paint(ui, KEY, rect, (size * 0.5) as u8) {
+					crate::design::paint_avatar(ui, &user.name, size, rect);
+				}
+				return;
+			}
 			self.clock += 1;
 			let avatar = user
 				.avatar

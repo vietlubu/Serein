@@ -1463,7 +1463,6 @@ impl State {
 		self.clear_search();
 		self.reset_thread_starter();
 		self.close_thread_pane();
-		self.cancel_summary();
 		self.search_target = None;
 		self.restore_scroll = false;
 		self.reactions.reset();
@@ -2881,6 +2880,7 @@ impl State {
 			self.interrupt_stickers();
 			self.posts.clear_summaries();
 			self.interactions.reset();
+			self.cancel_summary_read();
 			self.application_commands.clear();
 			self.local_game_activity = Default::default();
 			self.invalidate_messaging_permissions(None);
@@ -4552,6 +4552,7 @@ impl State {
 			self.gateway_connected = false;
 			self.invalidate_members();
 			self.cancel_history();
+			self.cancel_summary_read();
 		}
 		self.freshness = Freshness::Stale;
 	}
