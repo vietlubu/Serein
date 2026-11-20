@@ -45,6 +45,7 @@ pub mod server_integrations;
 pub mod server_roles;
 pub mod server_settings;
 pub mod slowmode;
+pub mod summary;
 pub mod thread_pane;
 pub mod thread_previews;
 mod thread_starter;
@@ -219,6 +220,12 @@ pub enum Command {
 	/// The newest messages of the peeked thread.
 	ThreadPane {
 		thread: Id,
+		request: u64,
+	},
+	/// `/summary`: the newest `count` messages (≤ summary::MAX_COUNT) of one conversation.
+	SummaryHistory {
+		channel: Id,
+		count: u16,
 		request: u64,
 	},
 	Gifs {
@@ -581,6 +588,11 @@ pub enum Event {
 		request: u64,
 		result: Result<Vec<Message>, auth::Failure>,
 	},
+	SummaryHistory {
+		channel: Id,
+		request: u64,
+		result: Result<Vec<Message>, auth::Failure>,
+	},
 	ForumSummaries {
 		request: u64,
 		results: Vec<(Id, Result<model::forum::Summary, auth::Failure>)>,
@@ -829,6 +841,7 @@ pub struct State {
 	pub archived_thread: Option<Id>,
 	pub thread_starter: thread_starter::Starter,
 	pub thread_pane: thread_pane::Pane,
+	pub summary: summary::Summary,
 	pub thread_previews: thread_previews::Previews,
 	pub search: Option<search::SearchView>,
 	pub search_request: u64,
@@ -1079,6 +1092,7 @@ impl Default for State {
 			archived_thread: None,
 			thread_starter: Default::default(),
 			thread_pane: Default::default(),
+			summary: Default::default(),
 			thread_previews: Default::default(),
 			search: None,
 			search_request: 0,
@@ -1446,6 +1460,7 @@ impl State {
 		self.clear_search();
 		self.reset_thread_starter();
 		self.close_thread_pane();
+		self.cancel_summary();
 		self.search_target = None;
 		self.restore_scroll = false;
 		self.reactions.reset();
@@ -2445,6 +2460,13 @@ impl State {
 			self.apply_thread_pane(thread, request, Err(auth::Failure::Capacity));
 			return;
 		}
+		if let Command::SummaryHistory {
+			channel, request, ..
+		} = command
+		{
+			self.apply_summary_history(channel, request, Err(auth::Failure::Capacity));
+			return;
+		}
 		if let Command::ForumSummaries { channels, request } = command {
 			self.apply_forum_summaries(
 				request,
@@ -3098,6 +3120,14 @@ impl State {
 				result,
 			} => {
 				self.apply_thread_pane(thread, request, result);
+				Ok(())
+			}
+			Event::SummaryHistory {
+				channel,
+				request,
+				result,
+			} => {
+				self.apply_summary_history(channel, request, result);
 				Ok(())
 			}
 			Event::ForumSummaries { request, results } => {
@@ -4722,10 +4752,12 @@ impl Event {
 				Self::ThreadPreview { result, .. } => {
 					result.as_ref().map_or(0, thread_previews::Loaded::bytes)
 				}
-				Self::ThreadPane { result, .. } => result.as_ref().map_or(0, |messages| {
-					messages.capacity() * size_of::<Message>()
-						+ messages.iter().map(Message::bytes).sum::<usize>()
-				}),
+				Self::ThreadPane { result, .. } | Self::SummaryHistory { result, .. } => {
+					result.as_ref().map_or(0, |messages| {
+						messages.capacity() * size_of::<Message>()
+							+ messages.iter().map(Message::bytes).sum::<usize>()
+					})
+				}
 				Self::ForumSummaries { results, .. } => {
 					results.capacity()
 						* size_of::<(Id, Result<model::forum::Summary, auth::Failure>)>()

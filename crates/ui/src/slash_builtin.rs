@@ -10,6 +10,7 @@ pub(super) enum Builtin {
 	Shrug,
 	Spoiler,
 	Sticker,
+	Summary,
 	Tableflip,
 	Unflip,
 }
@@ -65,6 +66,12 @@ pub(super) const ALL: &[Descriptor] = &[
 		usage: "/sticker [search]",
 	},
 	Descriptor {
+		command: Builtin::Summary,
+		name: "summary",
+		description: "Privately summarize recent messages with omp.",
+		usage: "/summary [count]",
+	},
+	Descriptor {
 		command: Builtin::Tableflip,
 		name: "tableflip",
 		description: "Append a table flip to your message.",
@@ -90,6 +97,7 @@ pub(super) enum Action<'a> {
 	Gifs(&'a str),
 	Stickers(&'a str),
 	Message { recipient: &'a str, text: &'a str },
+	Summary(u16),
 }
 
 /// Completion is only active for the leading command token, never inline text.
@@ -125,6 +133,17 @@ impl<'a> Invocation<'a> {
 			}
 			Builtin::Gif => return Ok(Action::Gifs(text)),
 			Builtin::Sticker => return Ok(Action::Stickers(text)),
+			Builtin::Summary => {
+				return match text.trim() {
+					"" => Ok(Action::Summary(client_core::summary::DEFAULT_COUNT)),
+					count => count
+						.parse()
+						.ok()
+						.filter(|count| (1..=client_core::summary::MAX_COUNT).contains(count))
+						.map(Action::Summary)
+						.ok_or("Use a number from 1 to 500: /summary [count]"),
+				};
+			}
 			Builtin::Msg => {
 				let (recipient, text) = split_word(text);
 				if recipient.is_empty() {
@@ -280,6 +299,13 @@ impl crate::MessagingUi {
 				self.emoji_picker.search_stickers(query);
 				self.clear_draft(state, channel);
 			}
+			Action::Summary(count) => match state.request_summary(channel, count) {
+				Ok(command) => {
+					self.clear_draft(state, channel);
+					commands.push(command);
+				}
+				Err(error) => state.status = error,
+			},
 			Action::Message {
 				recipient: query,
 				text,
@@ -437,7 +463,22 @@ mod tests {
 				text: "hello 世界"
 			})
 		);
-		for input in ["/me", "/spoiler\n\t", "/msg"] {
+		assert_eq!(
+			parse("/summary").unwrap().action(),
+			Ok(Action::Summary(client_core::summary::DEFAULT_COUNT))
+		);
+		assert_eq!(
+			parse("/summary 50").unwrap().action(),
+			Ok(Action::Summary(50))
+		);
+		for input in [
+			"/me",
+			"/spoiler\n\t",
+			"/msg",
+			"/summary 0",
+			"/summary 501",
+			"/summary abc",
+		] {
 			assert!(parse(input).unwrap().action().is_err());
 		}
 		let fits = format!("/me {}", "🙂".repeat(client_core::MAX_CONTENT - 2));

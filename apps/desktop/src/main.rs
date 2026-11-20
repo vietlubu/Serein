@@ -59,6 +59,7 @@ mod slash_demo;
 mod spotify;
 mod startup;
 mod sticker_upload;
+mod summary;
 mod toggle_setting;
 mod tray_window;
 mod updater;
@@ -1133,6 +1134,8 @@ struct Desktop {
 	log_open_refused: bool,
 	/// A diagnostics file being written after the owner picked a destination.
 	diagnostics_save: Option<std::sync::mpsc::Receiver<Option<Result<std::path::PathBuf, ()>>>>,
+	/// The running `/summary` worker: conversation, request and its answer.
+	summary: Option<(model::Id, u64, summary::Answer)>,
 	account_presences: std::collections::BTreeMap<model::Id, model::OwnPresence>,
 	presence_load_pending: bool,
 	deferred_connect: Option<(SessionSecret, bool)>,
@@ -1518,6 +1521,7 @@ fn demo_fetch(command: &Command) -> bool {
 		| Command::ThreadStarter { .. }
 		| Command::ThreadPreview { .. }
 		| Command::ThreadPane { .. }
+		| Command::SummaryHistory { .. }
 		| Command::Gifs { .. }
 		| Command::Profile { .. }
 		| Command::StreamPreview { .. }
@@ -2665,6 +2669,7 @@ impl Desktop {
 			log_verified: false,
 			log_open_refused: false,
 			diagnostics_save: None,
+			summary: None,
 			account_presences: std::collections::BTreeMap::new(),
 			presence_load_pending,
 			deferred_connect: None,
@@ -2954,6 +2959,33 @@ impl Desktop {
 			}
 			self.diagnostics_save = None;
 		}
+	}
+	/// Hands loaded `/summary` history to one `omp` worker and posts its answer privately.
+	fn sync_summary(&mut self, ctx: &egui::Context) {
+		if self.summary.is_none()
+			&& let Some(loaded) = self.state.take_summary_messages()
+		{
+			let transcript = summary::transcript(&self.state, loaded.channel, &loaded.messages);
+			drop(loaded.messages);
+			self.summary = Some((
+				loaded.channel,
+				loaded.request,
+				summary::spawn(transcript, ctx.clone()),
+			));
+		}
+		let Some((channel, request, receiver)) = &self.summary else {
+			return;
+		};
+		let result = match receiver.try_recv() {
+			Ok(result) => result,
+			Err(std::sync::mpsc::TryRecvError::Empty) => return,
+			Err(std::sync::mpsc::TryRecvError::Disconnected) => Err("omp could not be started."),
+		};
+		let (channel, request) = (*channel, *request);
+		self.summary = None;
+		let result =
+			result.map(|text| summary::reply(channel, request, self.state.user.as_ref(), &text));
+		self.state.finish_summary(channel, request, result);
 	}
 	fn save_app_preferences(&mut self) {
 		if self.fixture_only || self.state.demo {
@@ -4282,6 +4314,18 @@ impl Desktop {
 						result: Ok(vec![reply]),
 					}
 				}
+				Command::SummaryHistory {
+					channel,
+					count,
+					request,
+				} => Event::SummaryHistory {
+					channel,
+					request,
+					// Newest first, like Discord's pages.
+					result: Ok((0..u64::from(count.min(12)))
+						.map(|i| test_support::message(channel.0 + 100 - i, channel))
+						.collect()),
+				},
 				Command::CreatePost {
 					parent,
 					guild,
@@ -5263,6 +5307,7 @@ impl Desktop {
 		self.retry_history_clears();
 		self.sync_diagnostics_log(ctx);
 		self.sync_diagnostics_save(ctx);
+		self.sync_summary(ctx);
 		let mut results = Vec::new();
 		if let Some(store) = &mut self.store {
 			for _ in 0..4 {

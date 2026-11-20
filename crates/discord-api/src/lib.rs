@@ -1215,6 +1215,53 @@ impl DiscordApi {
 		}
 		Ok(messages)
 	}
+	/// Up to `count` newest messages, newest first, in pages of 100; a short page ends the read.
+	/// Pages past `summary::MAX_BYTES` are cut, keeping the newest messages.
+	async fn summary_history(
+		&self,
+		channel: Id,
+		count: u16,
+	) -> Result<Vec<model::Message>, Failure> {
+		use client_core::summary::{MAX_BYTES, MAX_COUNT};
+		if channel.0 == 0 || count == 0 || count > MAX_COUNT {
+			return Err(Failure::Protocol);
+		}
+		let count = count as usize;
+		let mut messages = Vec::with_capacity(count);
+		let mut bytes = 0usize;
+		let mut before: Option<Id> = None;
+		while messages.len() < count {
+			let limit = (count - messages.len()).min(100);
+			let mut path = format!("/channels/{channel}/messages?limit={limit}");
+			if let Some(before) = before {
+				path.push_str(&format!("&before={before}"));
+			}
+			let page: Vec<MessageDto> = decode(&self.request(Method::GET, &path, None).await?)
+				.map_err(|_| Failure::Protocol)?;
+			if page.len() > limit {
+				return Err(Failure::Capacity);
+			}
+			let full = page.len() == limit;
+			for message in page.into_iter().map(MessageDto::into_model) {
+				if message.id.0 == 0
+					|| message.channel != channel
+					|| before.is_some_and(|b| message.id >= b)
+				{
+					return Err(Failure::Protocol);
+				}
+				bytes += size_of::<model::Message>() + message.bytes();
+				if bytes > MAX_BYTES {
+					return Ok(messages);
+				}
+				before = Some(message.id);
+				messages.push(message);
+			}
+			if !full {
+				break;
+			}
+		}
+		Ok(messages)
+	}
 	/// One bounded 50-message history page, before or after a cursor or at the latest message.
 	async fn history(
 		&self,
@@ -1557,6 +1604,15 @@ impl DiscordApi {
 				thread,
 				request,
 				result: self.thread_pane(thread).await,
+			},
+			Command::SummaryHistory {
+				channel,
+				count,
+				request,
+			} => Event::SummaryHistory {
+				channel,
+				request,
+				result: self.summary_history(channel, count).await,
 			},
 			Command::Pins {
 				channel,
@@ -4399,30 +4455,24 @@ mod tests {
 		assert!(safe_delay(Some(-1.0)).is_err());
 	}
 
-	#[tokio::test]
-	async fn thread_cards_read_the_channel_then_one_message_and_reject_foreign_answers() {
-		use tokio::{
-			io::{AsyncReadExt, AsyncWriteExt},
-			net::TcpListener,
-		};
-		async fn serve(listener: &TcpListener, path: &str, body: &str) {
-			let (mut socket, _) = listener.accept().await.unwrap();
-			let mut request = Vec::new();
-			loop {
-				let mut bytes = [0; 1024];
-				let n = socket.read(&mut bytes).await.unwrap();
-				assert!(n > 0 && request.len() < 64 * 1024);
-				request.extend_from_slice(&bytes[..n]);
-				if request.windows(4).any(|window| window == b"\r\n\r\n") {
-					break;
-				}
+	async fn serve(listener: &TcpListener, path: &str, body: &str) {
+		let (mut socket, _) = listener.accept().await.unwrap();
+		let mut request = Vec::new();
+		loop {
+			let mut bytes = [0; 1024];
+			let n = socket.read(&mut bytes).await.unwrap();
+			assert!(n > 0 && request.len() < 64 * 1024);
+			request.extend_from_slice(&bytes[..n]);
+			if request.windows(4).any(|window| window == b"\r\n\r\n") {
+				break;
 			}
-			let request = String::from_utf8(request).unwrap();
-			assert!(
-				request.starts_with(&format!("GET {path} HTTP/1.1\r\n")),
-				"{request}"
-			);
-			socket
+		}
+		let request = String::from_utf8(request).unwrap();
+		assert!(
+			request.starts_with(&format!("GET {path} HTTP/1.1\r\n")),
+			"{request}"
+		);
+		socket
 				.write_all(
 					format!(
 						"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
@@ -4432,7 +4482,10 @@ mod tests {
 				)
 				.await
 				.unwrap();
-		}
+	}
+
+	#[tokio::test]
+	async fn thread_cards_read_the_channel_then_one_message_and_reject_foreign_answers() {
 		let channel = r#"{"id":"70","guild_id":"1","parent_id":"20","type":11,"name":"Synthetic thread","message_count":3,"last_message_id":"81"}"#;
 		for (channel_id, accepted) in [("70", true), ("71", false)] {
 			let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -4485,6 +4538,74 @@ mod tests {
 						.content,
 					"Latest reply"
 				);
+			} else {
+				assert_eq!(result.err(), Some(Failure::Protocol));
+			}
+		}
+	}
+
+	#[tokio::test]
+	async fn summary_history_pages_until_a_short_page_and_rejects_foreign_messages() {
+		fn page(ids: impl Iterator<Item = u64>, channel_id: u64) -> String {
+			let rows: Vec<_> = ids
+				.map(|id| format!(r#"{{"id":"{id}","channel_id":"{channel_id}","author":{{"id":"9","username":"Synthetic"}},"content":"m{id}"}}"#))
+				.collect();
+			format!("[{}]", rows.join(","))
+		}
+		for accepted in [true, false] {
+			let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+			let mut api = DiscordApi::new(Arc::new(
+				SessionSecret::from_owner_input("SYNTHETIC_SUMMARY_TOKEN".into()).unwrap(),
+			))
+			.unwrap();
+			api.base = format!("http://{}", listener.local_addr().unwrap());
+			let server = tokio::spawn(async move {
+				if accepted {
+					serve(
+						&listener,
+						"/channels/5/messages?limit=100",
+						&page((301..=400).rev(), 5),
+					)
+					.await;
+					serve(
+						&listener,
+						"/channels/5/messages?limit=50&before=301",
+						&page((291..=300).rev(), 5),
+					)
+					.await;
+				} else {
+					serve(
+						&listener,
+						"/channels/5/messages?limit=100",
+						&page([400].into_iter(), 6),
+					)
+					.await;
+				}
+			});
+			let event = tokio::time::timeout(
+				Duration::from_secs(10),
+				api.execute(Command::SummaryHistory {
+					channel: Id(5),
+					count: 150,
+					request: 3,
+				}),
+			)
+			.await
+			.unwrap();
+			// Exactly the scripted reads: a short page ends paging.
+			server.await.unwrap();
+			let Event::SummaryHistory {
+				channel,
+				request,
+				result,
+			} = event
+			else {
+				panic!("SummaryHistory")
+			};
+			assert_eq!((channel, request), (Id(5), 3));
+			if accepted {
+				let ids: Vec<u64> = result.unwrap().iter().map(|m| m.id.0).collect();
+				assert_eq!(ids, (291..=400).rev().collect::<Vec<_>>());
 			} else {
 				assert_eq!(result.err(), Some(Failure::Protocol));
 			}

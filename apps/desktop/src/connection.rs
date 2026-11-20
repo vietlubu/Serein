@@ -494,6 +494,8 @@ impl Connection {
                 let mut reaction_read:Option<AbortTask>=None;
                 // A thread card's preview is a passive read; it must never wait behind sends.
                 let mut thread_preview:Option<AbortTask>=None;
+                // Up to five paged reads for /summary; they must not hold the write queue.
+                let mut summary_history:Option<AbortTask>=None;
                 let mut ringing:Option<AbortTask>=None;
                 let mut recipient_ringing:Option<(client_core::voice::Command,AbortTask)>=None;
                 let mut upload:Option<AbortTask>=None;
@@ -683,6 +685,18 @@ impl Connection {
                                 thread_preview=Some(AbortTask(tokio::spawn(async move {
                                     let event=api.execute(command).await;
                                     let failure=match &event {Event::ThreadPreview{result:Err(f),..} if f.ends_session() && *f!=Failure::Capacity=>Some(*f),_=>None};
+                                    let error=emit(event).err().or(failure);
+                                    if let Some(error)=error {api.stop_with(error);publish_terminal(&finished, api.stop_reason().unwrap_or(error));}
+                                    wake.request_repaint();
+                                })));
+                                continue;
+                            }
+                            if matches!(command,Command::SummaryHistory{..}) {
+                                drop(summary_history.take());
+                                let api=api.clone();let emit=emit.clone();let finished=finished.clone();let wake=wake.clone();
+                                summary_history=Some(AbortTask(tokio::spawn(async move {
+                                    let event=api.execute(command).await;
+                                    let failure=match &event {Event::SummaryHistory{result:Err(f),..} if f.ends_session() && *f!=Failure::Capacity=>Some(*f),_=>None};
                                     let error=emit(event).err().or(failure);
                                     if let Some(error)=error {api.stop_with(error);publish_terminal(&finished, api.stop_reason().unwrap_or(error));}
                                     wake.request_repaint();
