@@ -222,6 +222,14 @@ pub fn visible_range(rows: &[(Id, f32)], min: f32, max: f32) -> (usize, usize, f
 	}
 	(first, end, top)
 }
+/// The round 64 px channel badge Discord shows above a conversation's beginning.
+pub(crate) fn badge(ui: &mut egui::Ui, icon: crate::icons::Icon) {
+	let colors = crate::design::palette(ui);
+	let (badge, _) = ui.allocate_exact_size(egui::Vec2::splat(64.0), egui::Sense::hover());
+	ui.painter()
+		.circle_filled(badge.center(), 32.0, colors.raised);
+	crate::icons::paint(ui.painter(), icon, badge.shrink(14.0), colors.text_strong);
+}
 fn channel_welcome(ui: &mut egui::Ui, channel: &model::Channel, height: f32) {
 	let colors = crate::design::palette(ui);
 	let width = (ui.available_width() - 32.0).max(1.0);
@@ -261,18 +269,13 @@ fn channel_welcome(ui: &mut egui::Ui, channel: &model::Channel, height: f32) {
 	egui::Frame::NONE
 		.inner_margin(egui::Margin::same(16))
 		.show(ui, |ui| {
-			let (badge, _) = ui.allocate_exact_size(egui::Vec2::splat(64.0), egui::Sense::hover());
-			ui.painter()
-				.circle_filled(badge.center(), 32.0, colors.raised);
-			crate::icons::paint(
-				ui.painter(),
+			badge(
+				ui,
 				match channel.kind {
 					5 => crate::icons::Icon::Megaphone,
 					10..=12 => crate::icons::Icon::Thread,
 					_ => crate::icons::Icon::Hash,
 				},
-				badge.shrink(14.0),
-				colors.text_strong,
 			);
 			ui.add_space(16.0);
 			ui.add(egui::Label::new(heading));

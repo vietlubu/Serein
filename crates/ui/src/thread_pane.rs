@@ -562,93 +562,89 @@ impl ThreadPaneUi {
 		let retained = last_toolbar
 			.filter(|_| egui::Popup::is_any_open(ui.ctx()))
 			.map(|(id, _)| id);
-		egui::ScrollArea::vertical()
-			.id_salt(("thread-pane", thread))
-			.stick_to_bottom(true)
-			.auto_shrink([false; 2])
-			.show(ui, |ui| {
-				ui.add_space(16.0);
-				egui::Frame::new()
-					.inner_margin(egui::Margin::symmetric(16, 0))
-					.show(ui, |ui| {
-						ui.set_width(ui.available_width());
+		bottom_scroll(ui, egui::Id::unique(("thread-pane", thread)), |ui| {
+			ui.add_space(16.0);
+			egui::Frame::new()
+				.inner_margin(egui::Margin::symmetric(16, 0))
+				.show(ui, |ui| {
+					ui.set_width(ui.available_width());
+					ui.label(design::semibold(ui, &channel.name, 22.0).color(colors.text_strong));
+					let origin = self.origin.and_then(|id| state.timeline.get(id));
+					if let Some(origin) = origin {
 						ui.label(
-							design::semibold(ui, &channel.name, 22.0).color(colors.text_strong),
+							RichText::new(crate::i18n::translate_args(
+								"thread-pane-started-by",
+								&[("name", state.message_author_name(origin))],
+							))
+							.color(colors.muted),
 						);
-						let origin = self.origin.and_then(|id| state.timeline.get(id));
-						if let Some(origin) = origin {
+					}
+					ui.separator();
+					let Some(pane) = state.thread_pane() else {
+						return;
+					};
+					// A message-started thread shares its starter's id; Discord shows it first.
+					let starter = origin.filter(|m| m.id == thread);
+					let mut previous: Option<&Message> = None;
+					for message in starter
+						.into_iter()
+						.chain(pane.messages.iter().filter(|m| m.kind != 21))
+					{
+						self.row(
+							ui,
+							state,
+							avatars,
+							profile,
+							timeline,
+							message,
+							previous,
+							thread,
+							(last_toolbar, retained),
+						);
+						rendered.push(message.id);
+						previous = Some(message);
+					}
+					for pending in state
+						.pending
+						.iter()
+						.filter(|p| p.channel == thread && p.delivery != model::Delivery::Confirmed)
+					{
+						ui.label(RichText::new(&pending.content).color(colors.muted));
+						if matches!(
+							pending.delivery,
+							model::Delivery::Rejected | model::Delivery::Ambiguous
+						) {
 							ui.label(
-								RichText::new(crate::i18n::translate_args(
-									"thread-pane-started-by",
-									&[("name", state.message_author_name(origin))],
-								))
+								RichText::new(crate::i18n::translate("thread-pane-not-sent"))
+									.color(colors.danger),
+							);
+						}
+					}
+					if pane.loading {
+						ui.horizontal(|ui| {
+							ui.spinner();
+							ui.label(
+								RichText::new(crate::i18n::translate("thread-pane-loading"))
+									.color(colors.muted),
+							);
+						});
+					} else if pane.failed {
+						ui.label(
+							RichText::new(crate::i18n::translate("thread-pane-failed"))
 								.color(colors.muted),
-							);
-						}
-						ui.separator();
-						let Some(pane) = state.thread_pane() else {
-							return;
-						};
-						// A message-started thread shares its starter's id; Discord shows it first.
-						let starter = origin.filter(|m| m.id == thread);
-						let mut previous: Option<&Message> = None;
-						for message in starter
-							.into_iter()
-							.chain(pane.messages.iter().filter(|m| m.kind != 21))
-						{
-							self.row(
-								ui,
-								state,
-								avatars,
-								profile,
-								timeline,
-								message,
-								previous,
-								thread,
-								(last_toolbar, retained),
-							);
-							rendered.push(message.id);
-							previous = Some(message);
-						}
-						for pending in state.pending.iter().filter(|p| {
-							p.channel == thread && p.delivery != model::Delivery::Confirmed
-						}) {
-							ui.label(RichText::new(&pending.content).color(colors.muted));
-							if matches!(
-								pending.delivery,
-								model::Delivery::Rejected | model::Delivery::Ambiguous
-							) {
-								ui.label(
-									RichText::new(crate::i18n::translate("thread-pane-not-sent"))
-										.color(colors.danger),
-								);
-							}
-						}
-						if pane.loading {
-							ui.horizontal(|ui| {
-								ui.spinner();
-								ui.label(
-									RichText::new(crate::i18n::translate("thread-pane-loading"))
-										.color(colors.muted),
-								);
-							});
-						} else if pane.failed {
-							ui.label(
-								RichText::new(crate::i18n::translate("thread-pane-failed"))
-									.color(colors.muted),
-							);
-							retry = ui
-								.button(crate::i18n::translate("post-menu-context-retry"))
-								.clicked();
-						} else if rendered.is_empty() {
-							ui.label(
-								RichText::new(crate::i18n::translate("thread-pane-empty"))
-									.color(colors.muted),
-							);
-						}
-						ui.add_space(12.0);
-					});
-			});
+						);
+						retry = ui
+							.button(crate::i18n::translate("post-menu-context-retry"))
+							.clicked();
+					} else if rendered.is_empty() {
+						ui.label(
+							RichText::new(crate::i18n::translate("thread-pane-empty"))
+								.color(colors.muted),
+						);
+					}
+					ui.add_space(12.0);
+				});
+		});
 		self.formats.retain(|id| rendered.contains(&id));
 		if let Some((message, attachment)) = self.viewing {
 			self.viewing = state.message(message).and_then(|m| {
@@ -1250,6 +1246,34 @@ impl ThreadPaneUi {
 		}
 		surface.finish(ui);
 	}
+}
+
+/// A vertical scroll area whose short content sits on its bottom edge, like Discord's thread pane.
+/// Scroll contents have unbounded height, so the previous frame's measured height sizes the spacer.
+pub(crate) fn bottom_scroll<R>(
+	ui: &mut egui::Ui,
+	id: egui::Id,
+	add: impl FnOnce(&mut egui::Ui) -> R,
+) -> R {
+	let viewport = ui.available_height();
+	let key = id.with("content-height");
+	let last = ui.data(|d| d.get_temp::<f32>(key)).unwrap_or(0.0);
+	egui::ScrollArea::vertical()
+		.id_salt(id)
+		.stick_to_bottom(true)
+		.auto_shrink([false; 2])
+		.show(ui, |ui| {
+			// The spacer's trailing item spacing would otherwise overflow by a few pixels.
+			ui.add_space((viewport - last - ui.spacing().item_spacing.y).max(0.0));
+			let inner = ui.scope(add);
+			let height = inner.response.rect.height();
+			if (height - last).abs() > 0.5 {
+				ui.data_mut(|d| d.insert_temp(key, height));
+				ui.ctx().request_repaint();
+			}
+			inner.inner
+		})
+		.inner
 }
 
 /// Moves the composer caret to `cursor` (in chars) and focuses it.
