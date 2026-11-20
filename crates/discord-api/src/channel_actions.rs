@@ -503,8 +503,16 @@ impl DiscordApi {
 		let source = channel_value(&bytes, guild, Some(channel))?;
 		// Validate full overwrite metadata before copying it to a creation request.
 		channel_result(&bytes, guild, Some(channel))?;
-		if let Action::CreateThread { name, message } = action {
+		if let Action::CreateThread {
+			name,
+			message,
+			private,
+		} = action
+		{
 			if !matches!(source["type"].as_u64(), Some(0 | 5)) {
+				return Err(Failure::Protocol);
+			}
+			if *private && source["type"].as_u64() != Some(0) {
 				return Err(Failure::Protocol);
 			}
 			// Documented thread creation: from one message, or standalone in the channel.
@@ -513,7 +521,9 @@ impl DiscordApi {
 				None => format!("/channels/{channel}/threads"),
 			};
 			let mut body = json!({"name": name, "auto_archive_duration": 4320});
-			if message.is_none() {
+			if *private {
+				body["type"] = json!(12);
+			} else if message.is_none() {
 				body["type"] = json!(11);
 			}
 			let response = self
@@ -1349,6 +1359,7 @@ mod tests {
 		let action = Action::CreateThread {
 			name: "My Thread".into(),
 			message: Some(Id(42)),
+			private: false,
 		};
 		let (result, ()) = tokio::join!(api.channel_action(Id(2), Id(3), &action), server);
 		let Outcome::Channel { channel, .. } = result.unwrap() else {
@@ -1384,6 +1395,7 @@ mod tests {
 		let action = Action::CreateThread {
 			name: "My Thread".into(),
 			message: Some(Id(42)),
+			private: false,
 		};
 		let (result, ()) = tokio::join!(api.channel_action(Id(2), Id(3), &action), server);
 		assert!(matches!(
@@ -1427,6 +1439,7 @@ mod tests {
 		let action = Action::CreateThread {
 			name: "My Thread".into(),
 			message: Some(Id(42)),
+			private: false,
 		};
 		let (result, ()) = tokio::join!(api.channel_action(Id(2), Id(3), &action), server);
 		assert!(matches!(
@@ -1435,5 +1448,39 @@ mod tests {
 				client_core::channel_actions::THREAD_ALREADY_OPENED
 			))
 		));
+	}
+
+	#[tokio::test]
+	async fn thread_create_private_posts_type_12() {
+		let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+		let mut api = DiscordApi::new(Arc::new(
+			SessionSecret::from_owner_input("SYNTHETIC_CHANNEL_TOKEN".into()).unwrap(),
+		))
+		.unwrap();
+		api.base = format!("http://{}", listener.local_addr().unwrap());
+		let server = async {
+			reply(&listener, "GET /channels/3 HTTP/1.1", 200, source()).await;
+			reply(
+				&listener,
+				"POST /channels/3/threads HTTP/1.1",
+				200,
+				json!({"id":"50","guild_id":"2","parent_id":"3","type":12,"name":"Secret"}),
+			)
+			.await
+		};
+		let action = Action::CreateThread {
+			name: "Secret".into(),
+			message: None,
+			private: true,
+		};
+		let (result, body) = tokio::join!(api.channel_action(Id(2), Id(3), &action), server);
+		assert_eq!(
+			body,
+			json!({"name":"Secret","auto_archive_duration":4320,"type":12})
+		);
+		let Outcome::Channel { channel, .. } = result.unwrap() else {
+			panic!("expected channel outcome");
+		};
+		assert_eq!((channel.id, channel.kind), (Id(50), 12));
 	}
 }

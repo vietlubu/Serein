@@ -3858,7 +3858,15 @@ thread-create-show-create = Tworzyć
 # Context: show
 thread-create-show-create-thread = Utwórz wątek
 # Context: show
+thread-create-show-enter-a-message-to-start-the-conversation = Wpisz wiadomość, aby rozpocząć rozmowę!
+# Context: show
 thread-create-show-everyone-who-can-see-this-channel-can-see-the-thread = Każdy, kto może zobaczyć ten kanał, może zobaczyć wątek.
+# Context: show
+thread-create-show-message = Wiadomość
+# Context: show
+thread-create-show-private-hint = Widzą go tylko zaproszone osoby i moderatorzy
+# Context: show
+thread-create-show-private-thread = Prywatny wątek
 # Context: show
 thread-create-show-the-selected-message-starts-the-thread-everyone-who-can-see = Wybrana wiadomość rozpoczyna wątek. Każdy, kto może zobaczyć ten kanał, może zobaczyć wątek.
 # Context: show

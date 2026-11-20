@@ -3854,7 +3854,15 @@ thread-create-show-create = Yaratmak
 # Context: show
 thread-create-show-create-thread = Konu Oluştur
 # Context: show
+thread-create-show-enter-a-message-to-start-the-conversation = Sohbeti başlatmak için bir mesaj yaz!
+# Context: show
 thread-create-show-everyone-who-can-see-this-channel-can-see-the-thread = Bu kanalı görebilen herkes konuyu görebilir.
+# Context: show
+thread-create-show-message = Mesaj
+# Context: show
+thread-create-show-private-hint = Yalnızca davet ettiğin kişiler ve moderatörler görebilir
+# Context: show
+thread-create-show-private-thread = Özel Konu
 # Context: show
 thread-create-show-the-selected-message-starts-the-thread-everyone-who-can-see = Seçilen mesaj konuyu başlatır. Bu kanalı görebilen herkes konuyu görebilir.
 # Context: show
