@@ -505,6 +505,27 @@ fn conflict_visual(ui: &egui::Ui, target: CaptureTarget) -> (f32, f32, Option<St
 	)
 }
 
+const SERVER_DIGITS: [Key; 10] = [
+	Key::Num0,
+	Key::Num1,
+	Key::Num2,
+	Key::Num3,
+	Key::Num4,
+	Key::Num5,
+	Key::Num6,
+	Key::Num7,
+	Key::Num8,
+	Key::Num9,
+];
+
+/// Rail index for Cmd+digit, like Discord: 1 is Home, 2..=9 the nth server, 0 the last server.
+fn server_digit_index(digit: usize, order_len: usize) -> Option<usize> {
+	match digit {
+		0 => order_len.checked_sub(1).filter(|&last| last > 0),
+		digit => Some(digit - 1).filter(|&index| index < order_len),
+	}
+}
+
 fn modifier_bits(modifiers: Modifiers) -> u8 {
 	let mut bits = 0;
 	if modifiers.command {
@@ -601,6 +622,7 @@ impl crate::MessagingUi {
 		&mut self,
 		ctx: &egui::Context,
 		state: &mut client_core::State,
+		commands: &mut Vec<client_core::Command>,
 	) -> bool {
 		if !self.shortcuts_ready(ctx)
 			|| self.settings.open
@@ -608,6 +630,35 @@ impl crate::MessagingUi {
 			|| self.channel_menu.is_open()
 		{
 			return false;
+		}
+		// Fixed like Discord's; a digit with no target stays unconsumed so egui's Cmd+0 zoom reset still runs.
+		let digit = ctx.input(|input| {
+			SERVER_DIGITS.iter().position(|&key| {
+				input.events.iter().any(|event| {
+					matches!(event, Event::Key { key: k, pressed: true, repeat: false, modifiers, .. }
+						if *k == key && modifier_bits(*modifiers) == model::keybinds::PRIMARY)
+				})
+			})
+		});
+		if let Some(digit) = digit {
+			let servers = super::server_order(state);
+			if let Some(index) = server_digit_index(digit, servers.len() + 1)
+				&& ctx
+					.input_mut(|input| input.consume_key(Modifiers::COMMAND, SERVER_DIGITS[digit]))
+			{
+				// Mirrors the rail's Home and server clicks.
+				match index.checked_sub(1).map(|server| servers[server]) {
+					Some(id) => {
+						self.guild = Some(id);
+						commands.extend(state.select_guild(id));
+					}
+					None => {
+						self.guild = None;
+						commands.extend(state.open_messages());
+						self.search.open = false;
+					}
+				}
+			}
 		}
 		if hit(ctx, &self.keybinds, KeybindAction::JumpToOldestUnread) && state.can_jump_unread() {
 			// The unread banner's path; the timeline consumes the flag.
@@ -1017,6 +1068,15 @@ const KEYS: &[(Key, &str)] = &[
 #[cfg(test)]
 mod tests {
 	use super::*;
+
+	#[test]
+	fn server_digits_map_like_discord() {
+		assert_eq!(server_digit_index(1, 1), Some(0));
+		assert_eq!(server_digit_index(0, 1), None);
+		assert_eq!(server_digit_index(0, 4), Some(3));
+		assert_eq!(server_digit_index(9, 4), None);
+		assert_eq!(server_digit_index(2, 4), Some(1));
+	}
 
 	#[test]
 	fn default_push_to_talk_does_not_consume_typing() {

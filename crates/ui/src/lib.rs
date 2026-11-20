@@ -5534,7 +5534,7 @@ impl MessagingUi {
 			self.extensions.report_error(error);
 		}
 		self.keybinds_shortcut(&ctx);
-		let escape_ready = self.catch_up_shortcuts(&ctx, state);
+		let escape_ready = self.catch_up_shortcuts(&ctx, state, &mut commands);
 		self.theme_preview_navigation(ui);
 		let settings_open =
 			self.settings.open || self.server_settings.is_open() || self.channel_menu.is_open();
