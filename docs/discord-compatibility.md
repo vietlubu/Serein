@@ -325,7 +325,7 @@ Live acceptance of the proxy query is unverified.
 
 Typing `/` opens a native, searchable command picker with built-in/application filters,
 keyboard selection and a bounded argument form. Local commands are `/gif`, `/sticker`,
-`/me`, `/msg`, `/shrug`, `/spoiler`, `/tableflip` and `/unflip`; they reuse existing
+`/me`, `/msg`, `/shrug`, `/spoiler`, `/summary`, `/tableflip` and `/unflip`; they reuse existing
 message, DM and media flows. Scheduled sends (`/schedule`) are not implemented.
 Select with Up/Down and Tab/Enter, or click a row. Selection fills the composer;
 the next explicit send executes a built-in. App command arguments appear as compact
@@ -336,6 +336,15 @@ the command name to return to the picker. `/msg @user [text]` opens an existing 
 stages text for review without replacing an occupied destination draft. `/gif [query]`
 and `/sticker [query]` open the existing picker. Failed app submissions expose the
 error and retain fields behind Edit again; retries require another explicit submission.
+`/summary [count]` reads the newest 1–500 messages (default 200) of the selected channel,
+thread or DM through the documented `GET /channels/{channel}/messages` route, in pages of 100
+(at most 2 MiB fetched). It pipes a plain transcript of at most 200 KiB to the locally installed
+`omp` CLI with its `smol` model role. Tools are refused and the run has no session; the call ends
+after 150 s. The answer appears as a private "Only you can see this" row. Nothing is sent to
+Discord or saved, and the row is dropped when you switch channels. Running the command is your
+consent to send that history to your own `omp` and its model provider. Serein finds `omp` on
+`PATH`, `~/.bun/bin`, `~/.local/bin`, `/opt/homebrew/bin` or `/usr/local/bin`. The thread peek
+composer does not run slash commands.
 
 Application discovery uses the unofficial normal-account
 `GET /guilds/{guild}/application-command-index` route for guild conversations and
