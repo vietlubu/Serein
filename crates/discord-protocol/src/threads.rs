@@ -9,6 +9,8 @@ use std::collections::BTreeSet;
 
 pub(crate) const MAX_ITEMS: usize = model::account::MAX_ENTRIES;
 pub(crate) const MAX_BYTES: usize = model::account::MAX_BYTES;
+/// All sync-carried previews together; matches client-core's preview cache budget.
+const MAX_PREVIEW_BYTES: usize = 2 * 1024 * 1024;
 
 pub(crate) fn list<'de, D: Deserializer<'de>, T: Deserialize<'de>>(
 	d: D,
@@ -46,6 +48,9 @@ pub struct ThreadListSync {
 	/// The account's memberships among `threads`; first-party syncs usually omit it.
 	#[serde(default, deserialize_with = "list")]
 	members: Vec<serde_json::Value>,
+	/// Unofficial (owner HAR, November 2026): the newest message of some listed threads.
+	#[serde(default, deserialize_with = "list")]
+	most_recent_messages: Vec<serde_json::Value>,
 }
 pub struct Sync {
 	pub guild: Id,
@@ -54,6 +59,8 @@ pub struct Sync {
 	pub removed: Vec<Id>,
 	/// Archive metadata of every listed thread, then any membership the sync carried.
 	pub changes: Vec<model::threads::Change>,
+	/// Each listed thread's newest message, when the sync carried it.
+	pub previews: Vec<model::Message>,
 }
 #[derive(Deserialize)]
 pub struct ThreadUpdate {
@@ -203,12 +210,32 @@ impl ThreadListSync {
 				.filter_map(|member| ThreadMember::deserialize(member).ok())
 				.filter_map(|member| Some(member.change(member.id.filter(|id| ids.contains(id))?))),
 		);
+		let mut previews: Vec<model::Message> = Vec::new();
+		let mut preview_bytes = 0;
+		for value in &self.most_recent_messages {
+			let Ok(message) = crate::MessageDto::deserialize(value) else {
+				continue;
+			};
+			let message = message.into_model();
+			// Only the message the sync names as its thread's latest describes the card.
+			if !threads
+				.iter()
+				.any(|t| t.id == message.channel && t.last_message == Some(message.id))
+				|| previews.iter().any(|p| p.channel == message.channel)
+				|| preview_bytes + message.bytes() > MAX_PREVIEW_BYTES
+			{
+				continue;
+			}
+			preview_bytes += message.bytes();
+			previews.push(message);
+		}
 		Ok(Sync {
 			guild: self.guild_id,
 			parents: self.channel_ids,
 			threads,
 			removed,
 			changes,
+			previews,
 		})
 	}
 }
@@ -296,6 +323,29 @@ mod tests {
 				.unwrap()
 				.into_model()
 				.is_ok()
+		);
+	}
+	#[test]
+	fn sync_previews_keep_only_each_listed_threads_latest_message() {
+		let latest = serde_json::json!({"id":"30","channel_id":"3","author":{"id":"7","username":"Synthetic"},"content":"Latest"});
+		let sync = serde_json::json!({"guild_id":"1","threads":[
+			{"id":"3","parent_id":"2","type":11,"last_message_id":"30"},
+			{"id":"4","parent_id":"2","type":11,"last_message_id":"40"}],
+			"most_recent_messages":[
+				latest,
+				{"id":"39","channel_id":"4","author":{"id":"7","username":"Synthetic"},"content":"Older"},
+				{"id":"x"},
+				"not a message",
+				{"id":"50","channel_id":"9","author":{"id":"7","username":"Synthetic"},"content":"Unlisted"},
+				latest]});
+		let sync = decode::<ThreadListSync>(&serde_json::to_vec(&sync).unwrap())
+			.unwrap()
+			.into_model()
+			.unwrap();
+		assert_eq!(sync.threads.len(), 2);
+		assert_eq!(
+			sync.previews.iter().map(|m| m.id).collect::<Vec<_>>(),
+			vec![Id(30)]
 		);
 	}
 	#[test]

@@ -612,7 +612,7 @@ fn subscription_packet(
 		.map(|(id, _)| id.to_string())
 		.into_iter()
 		.collect();
-	Frame::Text(serde_json::json!({"op":37,"d":{"subscriptions":{guild.to_string():{"typing":typing,"threads":false,"activities":true,"member_updates":false,"members":[],"channels":channels,"thread_member_lists":threads}}}}).to_string().into())
+	Frame::Text(serde_json::json!({"op":37,"d":{"subscriptions":{guild.to_string():{"typing":typing,"threads":true,"activities":true,"member_updates":false,"members":[],"channels":channels,"thread_member_lists":threads}}}}).to_string().into())
 }
 
 #[derive(Clone)]
@@ -4318,7 +4318,7 @@ mod member_tests {
 	                    assert_eq!(packet["op"],37);
 	                    assert_eq!(packet["d"]["subscriptions"].as_object().unwrap().len(),1);
 	                    let subscription=&packet["d"]["subscriptions"]["1"];
-	                    assert_eq!(subscription["threads"],false);
+	                    assert_eq!(subscription["threads"],true);
 	                    assert_eq!(subscription["activities"],true);
 	                    assert_eq!(subscription["member_updates"],false);
 	                    assert_eq!(subscription["members"],json!([]));

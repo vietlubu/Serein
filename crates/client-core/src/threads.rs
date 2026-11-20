@@ -1,6 +1,6 @@
 //! Active-thread snapshots update only their declared guild/parent scope.
 use crate::{MAX_EVENT_BYTES, MAX_NAV, State};
-use model::{Channel, Id};
+use model::{Channel, Id, Message};
 use std::collections::{BTreeMap, BTreeSet};
 
 impl State {
@@ -10,6 +10,7 @@ impl State {
 		parents: Option<Vec<Id>>,
 		mut threads: Vec<Channel>,
 		removed: Vec<Id>,
+		previews: Vec<Message>,
 	) -> Result<(), &'static str> {
 		if !self.guilds.iter().any(|g| g.id == guild) {
 			return Ok(());
@@ -117,6 +118,7 @@ impl State {
 		{
 			self.reload_forum_posts(parent);
 		}
+		self.seed_thread_previews(previews);
 		Ok(())
 	}
 
@@ -361,6 +363,7 @@ mod tests {
 			generation: state.generation,
 			event: Event::ThreadsSync {
 				removed: vec![],
+				previews: vec![],
 				guild: Id(1),
 				parents: Some(vec![]),
 				threads: vec![],
@@ -374,6 +377,7 @@ mod tests {
 			generation: state.generation,
 			event: Event::ThreadsSync {
 				removed: vec![],
+				previews: vec![],
 				guild: Id(999),
 				parents: None,
 				threads: vec![],
@@ -446,6 +450,7 @@ mod tests {
 			generation: state.generation,
 			event: Event::ThreadsSync {
 				removed: vec![],
+				previews: vec![],
 				guild: Id(1),
 				parents: Some(vec![Id(10)]),
 				threads: vec![channel(102, 1, Some(10), 11)],
@@ -475,6 +480,7 @@ mod tests {
 			generation: state.generation,
 			event: Event::ThreadsSync {
 				removed: vec![],
+				previews: vec![],
 				guild: Id(1),
 				parents: None,
 				threads: vec![],
@@ -589,6 +595,7 @@ mod tests {
 				generation: state.generation,
 				event: Event::ThreadsSync {
 					removed: vec![],
+					previews: vec![],
 					guild: Id(1),
 					parents,
 					threads,
@@ -639,7 +646,7 @@ mod tests {
 			};
 			assert!(
 				state
-					.apply_threads_sync(guild, parents, threads, removed)
+					.apply_threads_sync(guild, parents, threads, removed, vec![])
 					.is_err()
 			);
 			assert!(
