@@ -869,20 +869,17 @@ impl State {
 		None
 	}
 	pub fn can_react(&self, message: Id, emoji: Option<&ReactionEmoji>, add: bool) -> bool {
-		let Some(channel) = self.selected else {
+		let Some(message) = self.message(message) else {
 			return false;
 		};
-		if self.auth != AuthState::Authenticated
+		let channel = message.channel;
+		if !self.showing(channel)
+			|| self.auth != AuthState::Authenticated
 			|| !self.gateway_connected
 			|| self.freshness != Freshness::Fresh
 			|| !self.can_read_history(channel)
+			|| message.reactions.is_none()
 		{
-			return false;
-		}
-		let Some(message) = self.timeline.get(message) else {
-			return false;
-		};
-		if message.channel != channel || message.reactions.is_none() {
 			return false;
 		}
 		let existing = emoji.is_some_and(|emoji| {
@@ -926,7 +923,7 @@ impl State {
 		self.auth == AuthState::Authenticated
 			&& self.gateway_connected
 			&& self.can_view(channel)
-			&& self.timeline.get(message).is_some_and(|message| {
+			&& self.message(message).is_some_and(|message| {
 				message.channel == channel
 					&& !message.forwarded
 					&& !message.extra_content.poll
@@ -947,8 +944,7 @@ impl State {
 			return false;
 		};
 		let Some(message) = self
-			.timeline
-			.get(message)
+			.message(message)
 			.filter(|message| message.channel == channel && message.id.0 != 0)
 		else {
 			return false;
@@ -977,7 +973,7 @@ impl State {
 		{
 			return false;
 		}
-		if !self.timeline.get(message).is_some_and(|message| {
+		if !self.message(message).is_some_and(|message| {
 			message.channel == channel && message.id.0 != 0 && matches!(message.kind, 0 | 19)
 		}) {
 			return false;

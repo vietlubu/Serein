@@ -40,7 +40,7 @@ pub(super) struct ForwardDialog {
 impl ForwardDialog {
 	pub fn open(&mut self, state: &State, message: Id) {
 		if state.can_forward(message)
-			&& let Some(channel) = state.selected
+			&& let Some(channel) = state.message(message).map(|m| m.channel)
 		{
 			*self = Self {
 				source: Some((state.generation, channel, message)),
@@ -60,7 +60,7 @@ impl ForwardDialog {
 			return;
 		};
 		if generation != state.generation
-			|| state.selected != Some(channel)
+			|| !state.showing(channel)
 			|| !state.can_read_history(channel)
 		{
 			*self = Self::default();
@@ -201,7 +201,7 @@ impl ForwardDialog {
 			d.content(|ui| {
 				crate::design::card_divider(ui);
 				ui.add_space(2.0);
-				if let Some(source) = state.timeline.get(message) {
+				if let Some(source) = state.message(message) {
 					let preview: String = if source.content.contains("||") {
 						"[Spoiler hidden]".into()
 					} else {

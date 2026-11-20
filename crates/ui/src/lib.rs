@@ -5980,6 +5980,7 @@ impl MessagingUi {
 						&mut self.avatars,
 						&mut self.profile,
 						&mut self.channel_menu,
+						&mut self.timeline,
 						shortcuts::ShortcutView::new(
 							&self.channel_preferences,
 							shortcuts_available,
@@ -5987,6 +5988,9 @@ impl MessagingUi {
 						self.hide_nitro_emojis,
 					);
 				});
+			if let Some(target) = self.thread_pane.deleting.take() {
+				self.deleting = Some(target);
+			}
 			self.record_thread_pane(pane.response.rect.width());
 		}
 		// A one-to-one DM shows the other person's profile where servers list members.
@@ -6994,7 +6998,7 @@ impl MessagingUi {
 
 		self.reconcile_edit(state);
 		if self.deleting.is_some_and(|(channel, message)| {
-			state.selected != Some(channel) || state.timeline.get(message).is_none()
+			state.message(message).is_none_or(|m| m.channel != channel)
 		}) {
 			self.deleting = None;
 		}

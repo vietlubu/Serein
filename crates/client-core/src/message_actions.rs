@@ -53,15 +53,11 @@ impl State {
 		for ((channel, message), edit) in std::mem::take(&mut self.message_actions.edits) {
 			self.resident.remove(channel);
 			if !edit.observed
-				&& self.selected == Some(channel)
 				&& self
-					.timeline
-					.get(message)
-					.is_some_and(|m| m.content == edit.after)
+					.message(message)
+					.is_some_and(|m| m.channel == channel && m.content == edit.after)
 			{
-				let _ = self
-					.timeline
-					.patch(content_patch(channel, message, edit.before));
+				let _ = self.patch_loaded(content_patch(channel, message, edit.before));
 			}
 			self.message_actions
 				.failed_edits
@@ -90,18 +86,14 @@ impl State {
 			self.status = "Wait for the previous message edit to finish";
 			return None;
 		}
-		let current = self
-			.timeline
-			.get(message)
-			.filter(|m| m.channel == channel)?;
+		let current = self.message(message).filter(|m| m.channel == channel)?;
 		// Eight snapshots, each limited to a 64 KiB source plus MAX_CONTENT UTF-8 text.
 		if current.content.len() > 64 * 1024 {
 			return None;
 		}
 		let before = current.content.clone();
 		if self
-			.timeline
-			.patch(content_patch(channel, message, content.to_owned()))
+			.patch_loaded(content_patch(channel, message, content.to_owned()))
 			.is_err()
 		{
 			self.status = "Edit could not be applied; reload this conversation";
@@ -146,24 +138,20 @@ impl State {
 					&& updated.id == message
 					&& session_cache::Timeline::valid_message(&updated) =>
 			{
-				if !edit.observed && self.selected == Some(channel) && self.can_view(channel) {
+				if !edit.observed && self.showing(channel) && self.can_view(channel) {
 					let mut patch = content_patch(channel, message, updated.content);
 					patch.edited = updated.edited_at.map_or(Patch::Null, Patch::Value);
 					patch.mentions = Patch::Value(updated.mentions);
-					let _ = self.timeline.patch(patch);
+					let _ = self.patch_loaded(patch);
 				}
 			}
 			result => {
 				if !edit.observed
-					&& self.selected == Some(channel)
 					&& self
-						.timeline
-						.get(message)
-						.is_some_and(|m| m.content == edit.after)
+						.message(message)
+						.is_some_and(|m| m.channel == channel && m.content == edit.after)
 				{
-					let _ = self
-						.timeline
-						.patch(content_patch(channel, message, edit.before));
+					let _ = self.patch_loaded(content_patch(channel, message, edit.before));
 				}
 				self.message_actions
 					.failed_edits

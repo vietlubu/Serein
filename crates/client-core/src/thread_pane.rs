@@ -1,5 +1,4 @@
 //! Discord-style thread peek: the newest messages of one thread shown beside its parent.
-// shortcut: edits refresh only when the pane reopens; mirror MessagePatch if peeks need live edits.
 use crate::{Command, State, auth::AuthState, auth::Failure};
 use model::{Id, Message};
 
@@ -118,6 +117,75 @@ impl State {
 			self.revision += 1;
 		}
 	}
+	/// Whether `channel` is the selected conversation or the visible peeked thread.
+	pub fn showing(&self, channel: Id) -> bool {
+		self.selected == Some(channel)
+			|| self
+				.thread_pane()
+				.is_some_and(|pane| pane.thread == channel)
+	}
+	/// A loaded message of the selected conversation, else of the visible peeked thread.
+	pub fn message(&self, id: Id) -> Option<&Message> {
+		self.timeline.get(id).or_else(|| {
+			let messages = self.thread_pane()?.messages;
+			messages
+				.binary_search_by_key(&id, |m| m.id)
+				.ok()
+				.map(|i| &messages[i])
+		})
+	}
+	/// Replaces reactions on a loaded message of either view. The peek keeps its old list when
+	/// the new one exceeds the bounds, so a peek copy never invalidates the parent conversation.
+	pub fn set_message_reactions(
+		&mut self,
+		id: Id,
+		reactions: Option<Vec<model::Reaction>>,
+	) -> Result<(), &'static str> {
+		if self.timeline.get(id).is_some() {
+			return self.timeline.set_reactions(id, reactions);
+		}
+		let messages = &mut self.thread_pane.messages;
+		if let Ok(index) = messages.binary_search_by_key(&id, |m| m.id)
+			&& reactions.as_ref().is_none_or(|r| model::valid_reactions(r))
+		{
+			let mut message = messages.remove(index);
+			message.reactions = reactions;
+			insert(messages, message);
+			self.revision += 1;
+		}
+		Ok(())
+	}
+	/// Applies a patch to the peeked copy; a copy that would exceed the bounds keeps its old content.
+	pub(crate) fn patch_thread_pane(
+		&mut self,
+		patch: &model::MessagePatch,
+	) -> Result<(), &'static str> {
+		let pane = &mut self.thread_pane;
+		if pane.thread != Some(patch.channel) {
+			return Ok(());
+		}
+		let Ok(index) = pane.messages.binary_search_by_key(&patch.id, |m| m.id) else {
+			return Ok(());
+		};
+		let mut message = pane.messages[index].clone();
+		session_cache::apply_patch(&mut message, patch);
+		if !session_cache::Timeline::valid_message(&message)
+			|| message.bytes() > crate::MAX_EVENT_BYTES
+		{
+			return Err("Message patch exceeds capacity");
+		}
+		insert(&mut pane.messages, message);
+		self.revision += 1;
+		Ok(())
+	}
+	/// A local content patch for whichever view holds `patch.channel`.
+	pub(crate) fn patch_loaded(&mut self, patch: model::MessagePatch) -> Result<(), &'static str> {
+		if self.selected == Some(patch.channel) {
+			self.timeline.patch(patch)
+		} else {
+			self.patch_thread_pane(&patch)
+		}
+	}
 }
 
 /// Upserts by id, then drops the oldest until the item and byte bounds hold.
@@ -167,8 +235,7 @@ mod tests {
 		request
 	}
 
-	#[test]
-	fn peek_is_bounded_ordered_and_rejects_foreign_pages() {
+	fn peek_state() -> State {
 		let mut state = State {
 			auth: AuthState::Authenticated,
 			gateway_connected: true,
@@ -188,6 +255,21 @@ mod tests {
 			..State::default()
 		};
 		crate::tests::grant_permissions(&mut state);
+		state
+	}
+	/// A pane showing thread 30 with one reactable message 100.
+	fn seeded() -> State {
+		let mut state = peek_state();
+		let request = requested(state.open_thread_pane(Id(30)));
+		let mut m = message(100, 30);
+		m.reactions = Some(vec![]);
+		state.apply_thread_pane(Id(30), request, Ok(vec![m]));
+		state
+	}
+
+	#[test]
+	fn peek_is_bounded_ordered_and_rejects_foreign_pages() {
+		let mut state = peek_state();
 		let thread = Id(30);
 		let request = requested(state.open_thread_pane(thread));
 
@@ -225,5 +307,104 @@ mod tests {
 		);
 		let view = state.thread_pane().unwrap();
 		assert!(view.failed && view.messages.is_empty());
+	}
+
+	#[test]
+	fn peek_reactions_use_the_thread_and_settle_after_close() {
+		use crate::reactions;
+		let mut state = seeded();
+		let emoji = model::ReactionEmoji {
+			id: None,
+			name: Some("👍".into()),
+		};
+		assert!(state.can_react(Id(100), Some(&emoji), true));
+		let Some(Command::Reactions(reactions::Command::Set {
+			channel, request, ..
+		})) = state.prepare_reaction(Id(100), emoji.clone())
+		else {
+			panic!("a peeked message accepts a reaction");
+		};
+		assert_eq!(
+			channel,
+			Id(30),
+			"the write targets the thread, not the parent"
+		);
+
+		state
+			.apply_reactions(reactions::Event::Delta {
+				channel: Id(30),
+				message: Id(100),
+				user: Id(77),
+				emoji: emoji.clone(),
+				add: true,
+				burst: false,
+			})
+			.unwrap();
+		let live = state
+			.message(Id(100))
+			.unwrap()
+			.reactions
+			.as_deref()
+			.unwrap();
+		assert!(matches!(live, [r] if r.count == 1 && !r.me));
+
+		// A write that settles after the pane closes must not leave reactions busy forever.
+		state.close_thread_pane();
+		state
+			.apply_reactions(reactions::Event::Written {
+				channel: Id(30),
+				message: Id(100),
+				request,
+				result: Ok(()),
+			})
+			.unwrap();
+		state.next_reaction_read();
+		assert!(!state.reactions.busy());
+	}
+
+	#[test]
+	fn peek_edits_and_patches_apply_to_the_copy_without_touching_the_parent() {
+		use crate::message_actions::content_patch;
+		let mut state = seeded();
+		state.timeline.insert(message(5, 10), false, false).unwrap();
+		let content = |state: &State| state.message(Id(100)).unwrap().content.clone();
+		let original = content(&state);
+		let apply = |state: &mut State, event| {
+			state.apply(crate::Envelope {
+				generation: state.generation,
+				event,
+			})
+		};
+
+		let Some(Command::Edit { request, .. }) = state.prepare_edit(Id(30), Id(100), "new".into())
+		else {
+			panic!("an own peeked message is editable");
+		};
+		assert_eq!(content(&state), "new");
+		apply(
+			&mut state,
+			crate::Event::Edited {
+				channel: Id(30),
+				message: Id(100),
+				request,
+				result: Err(Failure::Network),
+			},
+		);
+		assert_eq!(content(&state), original, "a failed edit restores the copy");
+
+		apply(
+			&mut state,
+			crate::Event::Patch(content_patch(Id(30), Id(100), "patched".into())),
+		);
+		assert_eq!(content(&state), "patched");
+		apply(
+			&mut state,
+			crate::Event::Patch(content_patch(Id(30), Id(100), "x".repeat(70 * 1024))),
+		);
+		assert_eq!(content(&state), "patched");
+		assert!(
+			state.timeline.get(Id(5)).is_some(),
+			"an oversized peek patch never invalidates the parent"
+		);
 	}
 }

@@ -1388,7 +1388,7 @@ fn queue_missing_channel_reference(
 }
 /// An 18 px reply or command line led by the spine; `horizontal` would take the
 /// theme's taller control height and push the author line down.
-fn reference_row(ui: &mut egui::Ui, add_contents: impl FnOnce(&mut egui::Ui)) {
+pub(crate) fn reference_row(ui: &mut egui::Ui, add_contents: impl FnOnce(&mut egui::Ui)) {
 	let colors = crate::design::palette(ui);
 	ui.allocate_ui_with_layout(
 		egui::vec2(ui.available_width(), 18.0),
@@ -1565,7 +1565,7 @@ fn divider(
 	ui.add_space(if compact { 2.0 } else { 4.0 });
 }
 /// A hover-bar reaction: its emoji, whether the reader already reacted, and whether it toggles now.
-fn quick_reaction(
+pub(crate) fn quick_reaction(
 	state: &State,
 	message: &Message,
 	text: &str,
@@ -1583,20 +1583,24 @@ fn quick_reaction(
 		&& state.can_react(message.id, Some(&emoji), !reacted);
 	(emoji, reacted, enabled)
 }
-fn action_button(ui: &mut egui::Ui, icon: crate::icons::Icon, label: &str) -> egui::Response {
+pub(crate) fn action_button(
+	ui: &mut egui::Ui,
+	icon: crate::icons::Icon,
+	label: &str,
+) -> egui::Response {
 	crate::icons::button_immediate(ui, icon, 28.0, label)
 }
 
 /// Whether Translate has text to send. The URL itself is built only when Translate is
 /// clicked, so hovering a message never serializes its text.
-fn translatable(message: &Message) -> bool {
+pub(crate) fn translatable(message: &Message) -> bool {
 	!crate::i18n::message_text(message).trim().is_empty()
 }
 
 /// Uses the existing reviewed external-link flow; no message text leaves Serein silently.
 /// Very large messages are bounded before constructing a browser URL; the flag is true when
 /// only the start of the text fits, so the confirmation can say so.
-fn translation_url(message: &Message) -> Option<(String, bool)> {
+pub(crate) fn translation_url(message: &Message) -> Option<(String, bool)> {
 	fn candidate(text: &str) -> Option<String> {
 		let mut url = url::Url::parse("https://translate.google.com/").ok()?;
 		url.query_pairs_mut()
@@ -1834,7 +1838,7 @@ fn starts_rtl(text: &str) -> bool {
 /// Fills a message's action menu, including plugin message actions, and records the chosen
 /// plugin action with the message it applies to.
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
-fn message_actions(
+pub(crate) fn message_actions(
 	popup: egui::Popup<'_>,
 	(message, link, extension_actions, extension_request): (
 		&Message,
@@ -1847,9 +1851,9 @@ fn message_actions(
 		)>,
 	),
 	actions: (bool, bool, bool, bool),
+	// `None` read state hides Mark Read/Unread, for views without one such as the thread peek.
 	selection: (
-		Option<&mut Option<Id>>,
-		Option<&mut Option<Id>>,
+		Option<(Option<&mut Option<Id>>, Option<&mut Option<Id>>)>,
 		&mut Option<Id>,
 	),
 	editing: (&mut Option<(Id, Id, String)>, &mut bool),
@@ -1862,7 +1866,7 @@ fn message_actions(
 		&mut Option<(Id, model::ReactionEmoji, bool)>,
 	)>,
 ) {
-	let (mark_read, mark_unread, reply) = selection;
+	let (read_state, reply) = selection;
 	let (editing, edit_started) = editing;
 	let (own, can_reply, can_edit, can_delete) = actions;
 	let (can_pin, pinned, pin_request) = pin;
@@ -1966,33 +1970,35 @@ fn message_actions(
 			*view = Some((message.id, emoji, true));
 			ui.close();
 		}
-		if ui
-			.add_enabled(
-				mark_read.is_some(),
-				egui::Button::new(crate::i18n::translate(
-					"timeline-message-actions-mark-read-through-here",
-				)),
-			)
-			.clicked()
-		{
-			if let Some(mark_read) = mark_read {
-				*mark_read = Some(message.id);
+		if let Some((mark_read, mark_unread)) = read_state {
+			if ui
+				.add_enabled(
+					mark_read.is_some(),
+					egui::Button::new(crate::i18n::translate(
+						"timeline-message-actions-mark-read-through-here",
+					)),
+				)
+				.clicked()
+			{
+				if let Some(mark_read) = mark_read {
+					*mark_read = Some(message.id);
+				}
+				ui.close();
 			}
-			ui.close();
-		}
-		if ui
-			.add_enabled(
-				mark_unread.is_some(),
-				egui::Button::new(crate::i18n::translate(
-					"timeline-message-actions-mark-unread",
-				)),
-			)
-			.clicked()
-		{
-			if let Some(mark_unread) = mark_unread {
-				*mark_unread = Some(message.id);
+			if ui
+				.add_enabled(
+					mark_unread.is_some(),
+					egui::Button::new(crate::i18n::translate(
+						"timeline-message-actions-mark-unread",
+					)),
+				)
+				.clicked()
+			{
+				if let Some(mark_unread) = mark_unread {
+					*mark_unread = Some(message.id);
+				}
+				ui.close();
 			}
-			ui.close();
 		}
 		if ui
 			.add_enabled(
@@ -5200,8 +5206,10 @@ impl TimelineView {
 								),
 								(own, can_reply, can_edit, can_delete),
 								(
-									can_mark_read.then_some(&mut self.mark_read),
-									can_mark_unread.then_some(&mut self.mark_unread),
+									Some((
+										can_mark_read.then_some(&mut self.mark_read),
+										can_mark_unread.then_some(&mut self.mark_unread),
+									)),
 									&mut selected_reply,
 								),
 								(editing, &mut self.edit_started),
@@ -7013,7 +7021,7 @@ mod tests {
 							egui::Popup::menu(&menu),
 							(&message, None, &[], &mut None),
 							(own, true, true, can_delete),
-							(None, None, &mut reply),
+							(Some((None, None)), &mut reply),
 							(&mut editing, &mut edit_started),
 							&mut deleting,
 							(false, false, &mut None),
