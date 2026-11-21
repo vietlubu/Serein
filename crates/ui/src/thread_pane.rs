@@ -36,6 +36,8 @@ pub(super) struct ThreadPaneUi {
 	pub full_view: Option<Id>,
 	/// A delete for the host's confirmation dialog: channel and message.
 	pub deleting: Option<(Id, Id)>,
+	/// The unsent draft changed since the host last looked; edits to a message being edited do not count.
+	pub draft_edited: bool,
 }
 
 impl ThreadPaneUi {
@@ -55,6 +57,20 @@ impl ThreadPaneUi {
 		}
 		self.thread = Some(thread);
 		self.origin = Some(origin);
+	}
+
+	/// The peeked thread and its unsent text (set aside while editing a message), if any.
+	pub fn unsent(&self) -> Option<(Id, &str)> {
+		let text = if self.editing.is_some() {
+			self.saved_draft.as_deref()?
+		} else {
+			self.draft.as_str()
+		};
+		Some((self.thread?, text)).filter(|(_, text)| !text.trim().is_empty())
+	}
+
+	pub fn origin(&self) -> Option<Id> {
+		self.origin
 	}
 
 	fn cancel_edit(&mut self) {
@@ -406,6 +422,8 @@ impl ThreadPaneUi {
 														limit,
 													) {
 														Some(cursor) => {
+															self.draft_edited |=
+																self.editing.is_none();
 															place_caret(&ctx, input_id, cursor)
 														}
 														None => {
@@ -513,6 +531,11 @@ impl ThreadPaneUi {
 														.inner;
 													if !ime_frame {
 														self.layout.snap_cursor(&mut output, &ctx);
+													}
+													if output.response.changed()
+														&& self.editing.is_none()
+													{
+														self.draft_edited = true;
 													}
 													// An emptied edit submits too: it asks to delete the message.
 													if send

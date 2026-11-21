@@ -1839,6 +1839,12 @@ notification-settings-notification-settings-disables-notification-sounds-your-in
 # Context: notification_settings
 notification-settings-notification-settings-enable-desktop-notifications = 데스크톱 알림 활성화
 # Context: notification_settings
+notification-settings-unsent-draft-reminder = 보내지 않은 메시지 알림
+# Context: notification_settings
+notification-settings-unsent-draft-reminder-description = 입력한 메시지를 보내지 않고 이 시간 동안 자리를 비우면 데스크톱 알림을 표시합니다. 알림을 클릭하면 해당 대화로 돌아갑니다.
+# Context: notification_settings
+notification-settings-unsent-draft-reminder-off = 끔
+# Context: notification_settings
 notification-settings-notification-settings-enable-unread-message-badge = 읽지 않은 메시지 배지 활성화
 # Context: notification_settings
 notification-settings-notification-settings-for-per-channel-or-per-server-notifications-right-click-the = 채널이나 서버별 알림은 채널 또는 서버를 오른쪽 클릭한 후 알림 설정을 선택하세요.

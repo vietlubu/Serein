@@ -22,6 +22,8 @@ pub struct Device {
 	pub ptt_stop: bool,
 	/// Someone started watching this device's own screen share.
 	pub viewer_join: bool,
+	/// Minutes an unsent draft waits before a desktop reminder; 0 turns reminders off.
+	pub draft_reminder_minutes: u8,
 	pub volume: u8,
 }
 impl Default for Device {
@@ -44,6 +46,7 @@ impl Default for Device {
 			ptt_start: true,
 			ptt_stop: true,
 			viewer_join: true,
+			draft_reminder_minutes: 2,
 			volume: 75,
 		}
 	}

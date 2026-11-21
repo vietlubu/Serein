@@ -1008,10 +1008,73 @@ impl State {
 					.and_then(|g| g.member.as_ref())
 					.is_some_and(|member| roles.iter().any(|role| member.roles.contains(role))))
 	}
-	fn alert_preview(&self, message: &Message, mut text: &str) -> String {
-		let guild = self
-			.channel(message.channel)
-			.and_then(|channel| channel.guild);
+	/// Title and body for an unsent-draft reminder, or `None` when the conversation is gone or hidden.
+	pub fn draft_reminder_alert(&self, channel: Id, text: &str) -> Option<(String, String)> {
+		let target = self
+			.channel(channel)
+			.filter(|channel| channel.supports_text() && self.can_view(channel.id))?;
+		let place = self
+			.alert_place(channel)
+			.or_else(|| {
+				(target.kind == 1)
+					.then(|| target.recipients.first())
+					.flatten()
+					.map(|user| {
+						alert_text(
+							self.friend_nickname(user.id)
+								.unwrap_or_else(|| self.user_display_name(user)),
+							80,
+							256,
+						)
+					})
+			})
+			.filter(|place| !place.is_empty());
+		let title = alert_text(
+			&place.map_or_else(
+				|| "Unsent message".to_owned(),
+				|place| format!("Unsent message in {place}"),
+			),
+			160,
+			256,
+		);
+		let body = self.alert_preview(channel, &[], text);
+		let body = if body.is_empty() {
+			"You have an unsent message".to_owned()
+		} else {
+			body
+		};
+		Some((title, body))
+	}
+	/// Where an alert happened: group DM name or `#channel, parent`; `None` for 1:1 DMs.
+	fn alert_place(&self, channel: Id) -> Option<String> {
+		self.channel(channel)
+			.and_then(|channel| {
+				let name = |text: &str| alert_text(text, 80, 256);
+				match channel.kind {
+					3 => Some(name(self.conversation_name(channel))),
+					_ if channel.guild.is_some() => {
+						let own = name(&channel.name);
+						let parent = channel
+							.parent_id
+							.and_then(|id| self.channel(id))
+							.map(|parent| match parent.kind {
+								4 => name(&parent.name),
+								_ => format!("#{}", name(&parent.name)),
+							})
+							.filter(|parent| !parent.is_empty() && parent != "#");
+						(!own.is_empty()).then(|| match parent {
+							Some(parent) => format!("#{own}, {parent}"),
+							None => format!("#{own}"),
+						})
+					}
+					// 1:1 DM: author alone, matching Discord.
+					_ => None,
+				}
+			})
+			.filter(|place| !place.is_empty())
+	}
+	fn alert_preview(&self, channel: Id, mentions: &[model::User], mut text: &str) -> String {
+		let guild = self.channel(channel).and_then(|channel| channel.guild);
 		let mut output = String::new();
 		let mut count = 0;
 		while !text.is_empty() && count < 160 && output.len() < 512 {
@@ -1030,8 +1093,7 @@ impl State {
 							})
 							.find(|member| member.user.id == id)
 					});
-				let user = message
-					.mentions
+				let user = mentions
 					.iter()
 					.find(|user| user.id == id)
 					.or_else(|| self.user.as_ref().filter(|user| user.id == id))
@@ -1156,32 +1218,7 @@ impl State {
 		} else {
 			sender
 		};
-		let place = self
-			.channel(message.channel)
-			.and_then(|channel| {
-				let name = |text: &str| alert_text(text, 80, 256);
-				match channel.kind {
-					3 => Some(name(self.conversation_name(channel))),
-					_ if channel.guild.is_some() => {
-						let own = name(&channel.name);
-						let parent = channel
-							.parent_id
-							.and_then(|id| self.channel(id))
-							.map(|parent| match parent.kind {
-								4 => name(&parent.name),
-								_ => format!("#{}", name(&parent.name)),
-							})
-							.filter(|parent| !parent.is_empty() && parent != "#");
-						(!own.is_empty()).then(|| match parent {
-							Some(parent) => format!("#{own}, {parent}"),
-							None => format!("#{own}"),
-						})
-					}
-					// 1:1 DM: author alone, matching Discord.
-					_ => None,
-				}
-			})
-			.filter(|place| !place.is_empty());
+		let place = self.alert_place(message.channel);
 		let title = match place {
 			Some(place) => format!("{sender} ({place})"),
 			None => sender,
@@ -1196,7 +1233,7 @@ impl State {
 				"Sent a message".to_owned()
 			}
 		} else {
-			let text = self.alert_preview(message, &display);
+			let text = self.alert_preview(message.channel, &message.mentions, &display);
 			if text.is_empty() {
 				"Sent a message".to_owned()
 			} else {
