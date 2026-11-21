@@ -454,18 +454,25 @@ impl ThreadPaneUi {
 											ui.with_layout(
 												egui::Layout::left_to_right(egui::Align::Center),
 												|ui| {
-													let mut output = egui::ScrollArea::vertical()
-														.id_salt((input_id, "scroll"))
-														.max_height(
-															ctx.viewport_rect().height() * 0.5,
-														)
-														.min_scrolled_height(
-															ctx.viewport_rect().height() * 0.5,
-														)
-														.auto_shrink([false, true])
-														.show(ui, |ui| {
-															let layout = &mut self.layout;
-															let mut layouter =
+													// A top-down column, as in the main composer: the centered row
+													// layout would stretch the input to the scroll area's minimum height.
+													let mut output = ui
+														.vertical(|ui| {
+															ui.set_width(ui.available_width());
+															egui::ScrollArea::vertical()
+																.id_salt((input_id, "scroll"))
+																.max_height(
+																	ctx.viewport_rect().height()
+																		* 0.5,
+																)
+																.min_scrolled_height(
+																	ctx.viewport_rect().height()
+																		* 0.5,
+																)
+																.auto_shrink([false, true])
+																.show(ui, |ui| {
+																	let layout = &mut self.layout;
+																	let mut layouter =
 																|ui: &egui::Ui,
 																 buffer: &dyn egui::TextBuffer,
 																 width: f32| {
@@ -484,9 +491,12 @@ impl ThreadPaneUi {
 																	state.demo,
 																)
 																};
-															// A pre-laid galley keeps a long thread name on one elided line.
-															let hint = if self.draft.is_empty() {
-																let mut job = egui::text::LayoutJob::simple_singleline(
+																	// A pre-laid galley keeps a long thread name on one elided line.
+																	let hint = if self
+																		.draft
+																		.is_empty()
+																	{
+																		let mut job = egui::text::LayoutJob::simple_singleline(
 																	crate::i18n::translate_args(
 																		"thread-pane-message-hint",
 																		&[("thread", &channel.name)],
@@ -494,16 +504,17 @@ impl ThreadPaneUi {
 																	egui::TextStyle::Body.resolve(ui.style()),
 																	ui.visuals().weak_text_color(),
 																);
-																job.wrap = egui::text::TextWrapping::truncate_at_width(
+																		job.wrap = egui::text::TextWrapping::truncate_at_width(
 																	ui.available_width(),
 																);
-																egui::WidgetText::from(
-																	ui.painter().layout_job(job),
-																)
-															} else {
-																egui::WidgetText::default()
-															};
-															let output = egui::TextEdit::multiline(
+																		egui::WidgetText::from(
+																			ui.painter()
+																				.layout_job(job),
+																		)
+																	} else {
+																		egui::WidgetText::default()
+																	};
+																	let output = egui::TextEdit::multiline(
 																&mut self.draft,
 															)
 															.id(input_id)
@@ -525,8 +536,12 @@ impl ThreadPaneUi {
 															.frame(egui::Frame::NONE)
 															.hint_text(hint)
 															.show(ui);
-															self.layout.paint(ui, &output, avatars);
-															output
+																	self.layout.paint(
+																		ui, &output, avatars,
+																	);
+																	output
+																})
+																.inner
 														})
 														.inner;
 													if !ime_frame {
