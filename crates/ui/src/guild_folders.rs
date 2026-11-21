@@ -17,6 +17,8 @@ pub(super) struct FolderUi {
 	/// Collapsed folders whose servers stay listed until the close animation finishes.
 	closing: BTreeSet<u64>,
 	editor: Option<(u64, String, [u8; 3])>,
+	/// Server a keyboard switch opened; the rail scrolls to it once its folder is fully open.
+	scroll_to: Option<Id>,
 	generation: u64,
 	key: Option<(u64, u64)>,
 	rows: Box<[Row]>,
@@ -94,6 +96,41 @@ impl FolderUi {
 			self.closing.remove(&id);
 		}
 		self.key = None;
+	}
+}
+
+impl MessagingUi {
+	/// Mirrors the rail's server click, or its Home click for `None`, and reveals the server's
+	/// rail icon for keyboard switches.
+	pub(super) fn open_server(
+		&mut self,
+		state: &mut State,
+		commands: &mut Vec<Command>,
+		target: Option<Id>,
+	) {
+		self.guild = target;
+		self.folder_ui.scroll_to = target;
+		match target {
+			Some(id) => {
+				if let Some(folder) = state.guild_folders.as_ref().and_then(|settings| {
+					settings
+						.folders
+						.iter()
+						.find(|f| f.guild_ids.contains(&id))
+						.and_then(|f| f.id)
+				}) && !self.folder_ui.expanded.contains(&folder)
+				{
+					self.folder_ui.toggle(folder);
+					self.expanded_folders =
+						self.folder_ui.expanded.iter().copied().take(256).collect();
+				}
+				commands.extend(state.select_guild(id));
+			}
+			None => {
+				commands.extend(state.open_messages());
+				self.search.open = false;
+			}
+		}
 	}
 }
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -405,6 +442,7 @@ impl MessagingUi {
 		// The latest folder row's openness, and the clipped child `Ui` its servers slide out of.
 		let mut openness = (0, 1.0);
 		let mut reveal: Option<(u64, egui::Ui, f32, f32)> = None;
+		let mut scroll_target_listed = false;
 		for index in 0..self.folder_ui.rows.len() {
 			let (item, group) = self.folder_ui.rows[index];
 			if let Item::Folder(id) = item {
@@ -459,6 +497,7 @@ impl MessagingUi {
 					)
 				});
 			}
+			let reveal_open = reveal.is_none();
 			let target = match &mut reveal {
 				Some((_, child, _, _)) => child,
 				None => &mut *ui,
@@ -504,6 +543,14 @@ impl MessagingUi {
 								self.guild = Some(id);
 								if let Some(command) = state.select_guild(id) {
 									commands.push(command);
+								}
+							}
+							if self.folder_ui.scroll_to == Some(id) {
+								scroll_target_listed = true;
+								// Its folder is still sliding open while the row draws into a clipped child.
+								if reveal_open {
+									response.scroll_to_me(None);
+									self.folder_ui.scroll_to = None;
 								}
 							}
 							response
@@ -754,6 +801,9 @@ impl MessagingUi {
 		}
 		if let Some(reveal) = reveal {
 			finish_reveal(ui, reveal);
+		}
+		if !scroll_target_listed {
+			self.folder_ui.scroll_to = None;
 		}
 		if enabled
 			&& let Some(source) = egui::DragAndDrop::payload::<Item>(ui.ctx())
@@ -1132,6 +1182,53 @@ mod tests {
 				}
 			}
 		}
+	}
+
+	#[test]
+	fn keyboard_server_switch_opens_its_folder_and_scrolls_it_into_view() {
+		let mut state = test_support::demo_state();
+		test_support::seed_demo_folder_mosaic(&mut state);
+		let last = state.guilds.iter_mut().find(|g| g.id == Id(14)).unwrap();
+		last.name = "Click target".into();
+		last.icon = None;
+		let ctx = egui::Context::default();
+		let mut view = MessagingUi::default();
+		let viewport = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(80.0, 100.0));
+		let mut commands = Vec::new();
+		let mut position = None;
+		for frame in 0..8 {
+			if frame == 1 {
+				// After the first rail frame, like the app where the rail is already shown.
+				view.open_server(&mut state, &mut commands, Some(Id(14)));
+			}
+			let output = ctx.run_ui(
+				egui::RawInput {
+					screen_rect: Some(viewport),
+					time: Some(frame as f64),
+					..Default::default()
+				},
+				|ui| {
+					egui::ScrollArea::vertical()
+						.animated(false)
+						.show(ui, |ui| view.server_folders(ui, &mut state, &mut commands));
+				},
+			);
+			position = output.shapes.iter().find_map(|shape| match &shape.shape {
+				egui::Shape::Text(text) if text.galley.text() == "Ct" => Some(text.pos.y),
+				_ => None,
+			});
+			output.drop_without_applying_deltas();
+		}
+		assert!(
+			view.folder_ui.expanded.contains(&1),
+			"the server's folder must open"
+		);
+		assert_eq!(view.expanded_folders, [1]);
+		let y = position.expect("the folder's last server must be rendered");
+		assert!(
+			viewport.y_range().contains(y),
+			"server at {y} must be scrolled into view"
+		);
 	}
 
 	#[test]

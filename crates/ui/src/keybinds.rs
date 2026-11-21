@@ -646,18 +646,8 @@ impl crate::MessagingUi {
 				&& ctx
 					.input_mut(|input| input.consume_key(Modifiers::COMMAND, SERVER_DIGITS[digit]))
 			{
-				// Mirrors the rail's Home and server clicks.
-				match index.checked_sub(1).map(|server| servers[server]) {
-					Some(id) => {
-						self.guild = Some(id);
-						commands.extend(state.select_guild(id));
-					}
-					None => {
-						self.guild = None;
-						commands.extend(state.open_messages());
-						self.search.open = false;
-					}
-				}
+				let target = index.checked_sub(1).map(|server| servers[server]);
+				self.open_server(state, commands, target);
 			}
 		}
 		if hit(ctx, &self.keybinds, KeybindAction::JumpToOldestUnread) && state.can_jump_unread() {

@@ -1973,8 +1973,7 @@ impl MessagingUi {
 				if let Some(guild) = next
 					&& self.server_settings.navigate_away(state)
 				{
-					self.guild = Some(guild);
-					commands.extend(state.select_guild(guild));
+					self.open_server(state, commands, Some(guild));
 				}
 				None
 			}
