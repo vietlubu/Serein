@@ -1868,6 +1868,12 @@ notification-settings-notification-settings-disables-notification-sounds-your-in
 # Context: notification_settings
 notification-settings-notification-settings-enable-desktop-notifications = Enable Desktop Notifications
 # Context: notification_settings
+notification-settings-unsent-draft-reminder = Remind me about unsent messages
+# Context: notification_settings
+notification-settings-unsent-draft-reminder-description = Shows a desktop notification when a message you typed stays unsent this long after you leave it. Click it to return to the conversation.
+# Context: notification_settings
+notification-settings-unsent-draft-reminder-off = Off
+# Context: notification_settings
 notification-settings-notification-settings-enable-unread-message-badge = Enable Unread Message Badge
 # Context: notification_settings
 notification-settings-notification-settings-for-per-channel-or-per-server-notifications-right-click-the = For per-channel or per-server notifications, right-click the channel or server and select Notification Settings.

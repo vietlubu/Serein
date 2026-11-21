@@ -15,6 +15,11 @@ pub enum Alert {
 		avatar_key: String,
 		image_path: Option<String>,
 	},
+	Draft {
+		channel: Id,
+		title: String,
+		body: String,
+	},
 }
 #[derive(Default)]
 pub struct Runtime {
@@ -32,7 +37,18 @@ pub struct Runtime {
 	/// Direct conversations that alerted since they were last read, with the message that
 	/// alerted, for one ping per DM.
 	pinged_directs: std::collections::BTreeMap<Id, Id>,
+	/// Unsent drafts awaiting a reminder, keyed by conversation and whether the text sits in
+	/// the thread peek.
+	drafts: std::collections::BTreeMap<(Id, bool), DraftTimer>,
 }
+
+#[derive(Clone, Copy)]
+struct DraftTimer {
+	/// The later of the last edit and the moment the draft left the screen.
+	since: Instant,
+	visible: bool,
+}
+const MAX_DRAFT_REMINDERS: usize = 64;
 
 /// With one ping per direct conversation, keeps a conversation quiet after its first alert
 /// until its read marker reaches that message; returns whether this notification stays
@@ -132,6 +148,7 @@ impl Runtime {
 		self.badge = None;
 		// Another account may sign in next; its conversations start without alert history.
 		self.pinged_directs.clear();
+		self.drafts.clear();
 	}
 	/// Returns a coalesced desktop alert request. Sound is independent of desktop alerts.
 	pub fn poll(
@@ -168,6 +185,19 @@ impl Runtime {
 			.map(|id| (id, Sound::IncomingRing))
 			.or_else(|| outgoing.map(|id| (id, Sound::OutgoingRing)));
 		let (alert, sound) = self.deliver(state, ui, audible, focused, ringing, Instant::now());
+		let reminders = audible && ui.notifications_enabled && options.draft_reminder_minutes > 0;
+		let (reminder, wake) = self.draft_reminder(
+			state,
+			ui,
+			reminders,
+			focused,
+			alert.is_none(),
+			Instant::now(),
+		);
+		if let Some(wake) = wake {
+			ctx.request_repaint_after(wake);
+		}
+		let alert = alert.or(reminder);
 		if self.ring.is_some() {
 			ctx.request_repaint_after(Duration::from_millis(250));
 		}
@@ -211,6 +241,90 @@ impl Runtime {
 			sound_status
 		};
 		alert
+	}
+	/// Arms (or re-arms) the reminder for an edited draft; `peek` marks thread-peek text.
+	pub fn draft_edited(&mut self, channel: Id, peek: bool, now: Instant) {
+		if !self.drafts.contains_key(&(channel, peek))
+			&& self.drafts.len() >= MAX_DRAFT_REMINDERS
+			&& let Some(oldest) = self
+				.drafts
+				.iter()
+				.min_by_key(|(_, timer)| timer.since)
+				.map(|(key, _)| *key)
+		{
+			self.drafts.remove(&oldest);
+		}
+		self.drafts.insert(
+			(channel, peek),
+			DraftTimer {
+				since: now,
+				visible: false,
+			},
+		);
+	}
+	/// Restarts each unsent draft's delay while it is on screen and returns at most one reminder
+	/// for a draft left alone for the configured minutes, plus when the next one falls due.
+	fn draft_reminder(
+		&mut self,
+		state: &State,
+		ui: &ui::MessagingUi,
+		enabled: bool,
+		focused: bool,
+		free: bool,
+		now: Instant,
+	) -> (Option<Alert>, Option<Duration>) {
+		if !enabled {
+			self.drafts.clear();
+			return (None, None);
+		}
+		let delay =
+			Duration::from_secs(u64::from(ui.notification_options.draft_reminder_minutes) * 60);
+		let text = |id: Id, peek: bool| {
+			if peek {
+				ui.peek_draft()
+					.filter(|(thread, _)| *thread == id)
+					.map(|(_, text)| text)
+			} else {
+				state.drafts.get(&id).map(String::as_str)
+			}
+			.filter(|text| !text.trim().is_empty())
+		};
+		let (mut due, mut wake) = (None, None::<Duration>);
+		self.drafts.retain(|&(id, peek), timer| {
+			if text(id, peek).is_none() || !state.can_view(id) {
+				return false;
+			}
+			let visible = focused
+				&& if peek {
+					state.thread_pane().is_some_and(|pane| pane.thread == id)
+				} else {
+					state.selected == Some(id)
+				};
+			if visible || timer.visible {
+				timer.since = now;
+			}
+			timer.visible = visible;
+			// Leaving the draft produces a frame, so a visible one needs no wake.
+			if visible {
+				return true;
+			}
+			let left = (timer.since + delay).saturating_duration_since(now);
+			if left.is_zero() && free && due.is_none() {
+				due = Some((id, peek));
+				return false;
+			}
+			wake = Some(wake.map_or(left, |wake| wake.min(left)));
+			true
+		});
+		let alert = due.and_then(|(id, peek)| {
+			let (title, body) = state.draft_reminder_alert(id, text(id, peek)?)?;
+			Some(Alert::Draft {
+				channel: id,
+				title,
+				body,
+			})
+		});
+		(alert, wake)
 	}
 	/// Turns queued message notifications, the call ringtone and a settings preview into
 	/// at most one desktop alert and one sound, and records which direct conversations used
@@ -657,5 +771,57 @@ mod tests {
 		assert_eq!(cues.update(true, true, true), Some(Sound::PttStart));
 		assert_eq!(cues.update(false, true, false), None);
 		assert_eq!(cues.update(true, true, false), None);
+	}
+
+	/// A draft on screen never reminds; leaving it restarts the delay, the reminder fires once,
+	/// and a cleared draft or disabled reminders drop the timer.
+	#[test]
+	fn draft_reminder_waits_while_visible_fires_once_and_drops_cleared_drafts() {
+		let mut state = test_support::demo_state();
+		let channel = state
+			.channels
+			.iter()
+			.find(|c| c.guild.is_some() && c.kind == 0 && state.can_view(c.id))
+			.expect("demo has a visible server text channel")
+			.id;
+		let _ = state.select(channel);
+		assert_eq!(state.selected, Some(channel));
+		state.drafts.insert(channel, "unsent".into());
+		let ui = ui::MessagingUi::default();
+		let mut runtime = Runtime::default();
+		let t0 = Instant::now();
+		let min = |m: u64| t0 + Duration::from_secs(m * 60);
+		runtime.draft_edited(channel, false, t0);
+		let poll = |runtime: &mut Runtime, focused, at| {
+			runtime.draft_reminder(&state, &ui, true, focused, true, at)
+		};
+		assert!(poll(&mut runtime, true, min(5)).0.is_none());
+		let (alert, wake) = poll(&mut runtime, false, min(6));
+		assert!(alert.is_none());
+		assert_eq!(wake, Some(Duration::from_secs(120)));
+		assert!(
+			poll(&mut runtime, false, min(8) - Duration::from_secs(1))
+				.0
+				.is_none()
+		);
+		assert!(matches!(
+			poll(&mut runtime, false, min(8)).0,
+			Some(Alert::Draft { channel: id, .. }) if id == channel
+		));
+		assert!(poll(&mut runtime, false, min(30)).0.is_none());
+
+		runtime.draft_edited(channel, false, min(31));
+		state.drafts.remove(&channel);
+		assert!(
+			runtime
+				.draft_reminder(&state, &ui, true, false, true, min(40))
+				.0
+				.is_none()
+		);
+		assert!(runtime.drafts.is_empty());
+
+		runtime.draft_edited(channel, false, min(41));
+		runtime.draft_reminder(&state, &ui, false, false, true, min(50));
+		assert!(runtime.drafts.is_empty());
 	}
 }

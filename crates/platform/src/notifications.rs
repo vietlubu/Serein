@@ -95,6 +95,8 @@ struct Alert {
 
 struct Command {
 	generation: u64,
+	/// Click target.
+	channel: Option<model::Id>,
 	key: Option<(model::Id, model::Id)>,
 	alert: Option<Alert>,
 	close: Vec<(model::Id, model::Id)>,
@@ -181,6 +183,7 @@ impl Notifications {
 		if let Some(send) = &self.send {
 			let _ = send.try_send(Command {
 				generation,
+				channel: None,
 				key: None,
 				close: Vec::new(),
 				alert: None,
@@ -207,6 +210,7 @@ impl Notifications {
 		if let Some(send) = &self.send {
 			let _ = send.try_send(Command {
 				generation,
+				channel: None,
 				key: None,
 				close: Vec::new(),
 				alert: None,
@@ -228,7 +232,7 @@ impl Notifications {
 		body: String,
 		image_path: Option<String>,
 	) -> bool {
-		self.message(None, title, body, image_path)
+		self.message(None, None, title, body, image_path)
 	}
 	pub fn notify_channel(
 		&mut self,
@@ -238,7 +242,17 @@ impl Notifications {
 		body: String,
 		image_path: Option<String>,
 	) -> bool {
-		self.message(Some((channel, message)), title, body, image_path)
+		self.message(
+			Some(channel),
+			Some((channel, message)),
+			title,
+			body,
+			image_path,
+		)
+	}
+	/// Unsent-draft reminder: a click opens `channel`; read markers never close it.
+	pub fn notify_draft(&mut self, channel: model::Id, title: String, body: String) -> bool {
+		self.message(Some(channel), None, title, body, None)
 	}
 	/// Close delivered channel alerts whose message `read(channel, message)` reports read.
 	pub fn close_read(&mut self, read: impl Fn(model::Id, model::Id) -> bool) {
@@ -253,6 +267,7 @@ impl Notifications {
 		// A full queue keeps the keys so the next read change retries.
 		if let Err(mpsc::TrySendError::Full(command)) = send.try_send(Command {
 			generation: self.generation.load(Ordering::Acquire),
+			channel: None,
 			key: None,
 			alert: None,
 			close,
@@ -270,6 +285,7 @@ impl Notifications {
 	}
 	fn message(
 		&mut self,
+		channel: Option<model::Id>,
 		key: Option<(model::Id, model::Id)>,
 		title: String,
 		body: String,
@@ -289,13 +305,19 @@ impl Notifications {
 				body: body.into_boxed_str(),
 				image_path: image_path.map(String::into_boxed_str),
 			},
+			channel,
 			key,
 		)
 	}
 	fn enqueue(&mut self, alert: Alert) -> bool {
-		self.enqueue_channel(alert, None)
+		self.enqueue_channel(alert, None, None)
 	}
-	fn enqueue_channel(&mut self, alert: Alert, key: Option<(model::Id, model::Id)>) -> bool {
+	fn enqueue_channel(
+		&mut self,
+		alert: Alert,
+		channel: Option<model::Id>,
+		key: Option<(model::Id, model::Id)>,
+	) -> bool {
 		if !matches!(self.status(), Status::Ready | Status::QueueFull) {
 			return false;
 		}
@@ -303,6 +325,7 @@ impl Notifications {
 		let Some(send) = &self.send else { return false };
 		match send.try_send(Command {
 			generation,
+			channel,
 			key,
 			alert: Some(alert),
 			close: Vec::new(),
@@ -431,7 +454,7 @@ fn worker(
 		let activation = Activation {
 			send: activated.clone(),
 			generation,
-			channel: command.key.map(|(channel, _)| channel),
+			channel: command.channel,
 			wake: Arc::clone(&wake),
 			restore: Arc::clone(&restore),
 		};

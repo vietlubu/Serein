@@ -726,6 +726,17 @@ impl MessagingUi {
 	pub fn set_interaction_files(&mut self, custom_id: &str, files: Vec<(usize, String)>) {
 		self.interaction_components.set_files(custom_id, files);
 	}
+	/// The thread peek's unsent text; kept after the peek closes until another thread is peeked.
+	pub fn peek_draft(&self) -> Option<(Id, &str)> {
+		self.thread_pane.unsent()
+	}
+	pub fn take_peek_draft_edited(&mut self) -> bool {
+		std::mem::take(&mut self.thread_pane.draft_edited)
+	}
+	/// Reopens the peek holding `thread`'s unsent text; select its parent first.
+	pub fn reopen_peek(&mut self, thread: Id) {
+		self.timeline.thread_open = Some((thread, self.thread_pane.origin().unwrap_or(thread)));
+	}
 
 	/// Feed the frame's middle button before `show`. Never fed means never pressed.
 	/// A bound middle button does not also start autoscroll.

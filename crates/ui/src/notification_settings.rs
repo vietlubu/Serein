@@ -222,6 +222,35 @@ impl MessagingUi {
 				design::hint(ui, self.notification_status);
 			}
 			design::card_divider(ui);
+			ui.add_enabled_ui(self.notifications_enabled, |ui| {
+				let label = |minutes: u8| {
+					if minutes == 0 {
+						crate::i18n::translate("notification-settings-unsent-draft-reminder-off")
+					} else {
+						idle_label(u32::from(minutes) * 60)
+					}
+				};
+				design::row(
+					ui,
+					"notification-settings-unsent-draft-reminder",
+					Some("notification-settings-unsent-draft-reminder-description"),
+					|ui| {
+						design::Select::from_id_salt("notification-settings-unsent-draft-reminder")
+							.selected_text(label(self.notification_options.draft_reminder_minutes))
+							.width(ui.available_width().min(160.0))
+							.show_ui(ui, |ui| {
+								for minutes in [0u8, 1, 2, 5, 10, 15, 30] {
+									ui.selectable_value(
+										&mut self.notification_options.draft_reminder_minutes,
+										minutes,
+										label(minutes),
+									);
+								}
+							});
+					},
+				);
+			});
+			design::card_divider(ui);
 			design::switch(
 				ui,
 				"settings-auto-idle",

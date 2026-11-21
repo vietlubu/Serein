@@ -6384,8 +6384,22 @@ impl eframe::App for Desktop {
 			&& self.state.auth == AuthState::Authenticated
 		{
 			self.tray_window.show(ctx);
-			if let Some(command) = self.state.select(channel) {
+			// A thread peek's unsent text reopens beside its parent; everything else opens in full.
+			let parent = self
+				.messaging
+				.peek_draft()
+				.is_some_and(|(thread, _)| thread == channel)
+				.then(|| {
+					self.state
+						.channel(channel)
+						.and_then(|thread| thread.parent_id)
+				})
+				.flatten();
+			if let Some(command) = self.state.select(parent.unwrap_or(channel)) {
 				self.command(command);
+			}
+			if parent.is_some() {
+				self.messaging.reopen_peek(channel);
 			}
 		}
 		if let Some(alert) = self.notification_runtime.poll(
@@ -6411,6 +6425,13 @@ impl eframe::App for Desktop {
 					{
 						worker.request(avatar_key);
 					}
+				}
+				notification_runtime::Alert::Draft {
+					channel,
+					title,
+					body,
+				} => {
+					self.notifications.notify_draft(channel, title, body);
 				}
 			}
 		}
@@ -7296,9 +7317,17 @@ impl eframe::App for Desktop {
 				}
 			}
 			let draft_changes = std::mem::take(&mut self.messaging.draft_changes);
+			let edited = std::time::Instant::now();
 			for channel in draft_changes {
+				self.notification_runtime
+					.draft_edited(channel, false, edited);
 				let content = recovery_draft(&self.state, channel);
 				self.queue_cache(cache::Operation::SaveDraft { channel, content });
+			}
+			if self.messaging.take_peek_draft_edited()
+				&& let Some((thread, _)) = self.messaging.peek_draft()
+			{
+				self.notification_runtime.draft_edited(thread, true, edited);
 			}
 			if self.messaging.clear_cache_requested {
 				self.messaging.clear_cache_requested = false;
