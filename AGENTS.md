@@ -25,27 +25,21 @@ for UI, `docs/discord-compatibility.md` for protocol, `docs/storage-policy.md` f
 
 ## Delivery
 
-Feature/fix requests authorize implementation and the ordinary tested PR workflow: task branch,
-local checks, synthetic screenshots and measurements when relevant, commit, push to `origin`,
-and create or update a PR. Follow `.agents/skills/serein-delivery/SKILL.md`. Reuse an open task
-PR. Mark complete implementations ready for review; only unfinished requested work belongs in draft.
-CI failures or unavailable evidence do not determine draft status. Report checks and limitations
-accurately. Never deploy, release or change repository permissions.
+Feature/fix requests authorize implementation, local checks and a local commit on the current
+branch. Do not create a branch, push, or create/update a PR unless the owner explicitly asks.
+Follow `.agents/skills/serein-delivery/SKILL.md`. Report checks and limitations accurately.
+Never deploy, release or change repository permissions.
 
-After pushing changes to an open PR, request fresh review from its existing human reviewers
-and prompt the review bots that reviewed it using their supported re-review commands. This is
-authorized delivery work; do not ask the owner again. Include the pushed commit and a brief
-summary of addressed findings, and ask reviewers to reassess and resolve findings they confirm
-are fixed. Verify the requests were submitted and report review as pending until it completes.
-Do not resolve reviewers' threads on their behalf or treat a re-review request as approval.
+When the owner asks to push to an open PR, request fresh review from its existing human reviewers
+and prompt the review bots that reviewed it using their supported re-review commands. Include the
+pushed commit and a brief summary of addressed findings. Do not resolve reviewers' threads on their
+behalf or treat a re-review request as approval.
 
 ### `!fast`
 
 Implement locally and run only the smallest useful debug command. Skip tests, packages, screenshots,
-measurements, commits, pushes and PR work. Keep changes uncommitted. If this branch has an open task
-PR, offer to update it on confirmation. Otherwise ask whether the owner wants a PR or a direct push
-to `main`. After confirmation, run the required format and Clippy checks, fix failures, and deliver
-only to the chosen destination. Never include unrelated work.
+measurements and commits. Keep changes uncommitted until the owner confirms; then run the required
+format and Clippy checks, fix failures, and commit on the current branch. Never include unrelated work.
 
 For application work outside `!fast`, use the pinned toolchain and lockfile, run focused checks and
 `cargo xtask check`; run `node tests/login-handoff.cjs` for auth changes and `cargo xtask package`
@@ -78,20 +72,18 @@ a quick read of the code would not. Prefer extending an existing test over addin
 
 ## Git
 
-Check `git status --short`, branch/upstream and `git fetch origin`. Discover the remote default
-branch. Fast-forward only; never switch another task branch. Start from a clean default branch and
-create a scoped task branch. Preserve unrelated changes; never stash, reset, discard or commit them.
-Use a separate worktree when dirty state cannot be safely separated. Stage explicit task files,
-review the staged diff, use a scoped Conventional Commit, and push normally.
+Check `git status --short` and the current branch. Work and commit on the current branch; do not
+create or switch branches, and do not push. Preserve unrelated changes; never stash, reset, discard
+or commit them. Stage explicit task files, review the staged diff and use a scoped Conventional
+Commit. Do not create `docs/progress.md` or `docs/adr/`; update performance, compatibility, storage
+or dependency docs when their claims change.
 
-For PRs use `.github/pull_request_template.md`, explicit base/head and `gh pr create/edit`. User
-visible changes need before/after screenshots; runtime changes need relevant performance comparisons.
-Use the delivery skill for evidence. Inspect checks, fix task-caused failures and report pending or
-pre-existing failures honestly. Do not create `docs/progress.md` or `docs/adr/`; update performance,
-compatibility, storage or dependency docs when their claims change.
+Only when the owner explicitly asks for a PR: use `.github/pull_request_template.md`, explicit
+base/head and `gh pr create/edit`; user-visible changes need before/after screenshots and runtime
+changes need relevant performance comparisons (see the delivery skill for evidence).
 
-For author-visible SDK changes, use `.agents/skills/serein-sdk-wiki/SKILL.md` and publish its
-reviewed wiki update from the pushed source commit. Keep unmerged capabilities labeled Preview.
+For author-visible SDK changes, use `.agents/skills/serein-sdk-wiki/SKILL.md`; publish its wiki
+update only after the owner has pushed the source commit. Keep unmerged capabilities labeled Preview.
 
 Load optional skills only for their specific workflows: `ponytail` for complexity tradeoffs,
 `visual-design-polish` for substantial UI polish, `gh-fix-ci` for CI diagnosis, and

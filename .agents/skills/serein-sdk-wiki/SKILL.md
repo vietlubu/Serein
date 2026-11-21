@@ -32,8 +32,9 @@ complete JSON objects and compilable Rust examples; validate them against the
 current SDK. Add new fields to the appropriate input, data, output or panel page,
 and keep cross-page links and the Home/sidebar navigation working.
 
-Finish canonical docs and source checks, commit and push the task branch using
-the ordinary delivery workflow. Fetch `origin` and record the full pushed commit.
+Finish canonical docs and source checks and commit on the current branch using the ordinary
+delivery workflow. Publishing needs a pushed commit: stop and ask the owner to push (or to authorize
+a push) before continuing. Fetch `origin` and record the full pushed commit.
 The generator reads that commit, never dirty working files. New unreleased behavior
 must be labeled `Preview SDK — PR #<number>, not yet released`; use a release label
 only when its availability has been verified. The wiki may document a pushed PR
