@@ -54,6 +54,7 @@ mod theme_editor;
 pub use start_screen::{DecodedStartScreen, StartScreenView};
 mod thread_create;
 mod thread_pane;
+pub mod translation;
 pub use extensions_ui::{ExtensionContext, ExtensionEntry, ExtensionRequest, ExtensionUi};
 pub use interface_ui::PluginInterface;
 pub mod emoji;
@@ -393,6 +394,16 @@ pub struct MessagingUi {
 	pub image_cache: model::CachePreferences,
 	/// Clock style for message times.
 	pub time_format: model::TimeFormat,
+	/// Translation target code; `None` follows the interface language.
+	pub translation_language: Option<String>,
+	pub translation_engine: model::translation::TranslationEngine,
+	/// OpenAI-compatible chat completions endpoint and model.
+	pub translation_endpoint: String,
+	pub translation_model: String,
+	/// API key typed in Settings; moved into a request on Save, never persisted here.
+	translation_key_draft: zeroize::Zeroizing<String>,
+	translation_key_request: Option<translation::KeyRequest>,
+	translation_key_busy: bool,
 	/// First-run setup still to show; the desktop restores and persists it.
 	pub setup_pending: bool,
 	setup_step: usize,
@@ -901,6 +912,48 @@ impl MessagingUi {
 			}
 			toggles
 		})
+	}
+
+	pub fn take_translation_request(&mut self) -> Option<translation::Request> {
+		self.timeline.translation_request.take()
+	}
+	pub fn finish_translation(
+		&mut self,
+		message: Id,
+		content: u64,
+		result: Result<String, &'static str>,
+	) {
+		if let Some(key) = self.timeline.finish_translation(message, content, result) {
+			self.toasts.push(design::Level::Error, i18n::translate(key));
+		}
+	}
+	/// Selected target code, or the one matching Serein's interface language.
+	pub fn translation_target(&self) -> &'static str {
+		self.translation_language
+			.as_deref()
+			.and_then(model::translation::language)
+			.map_or_else(
+				|| {
+					model::translation::target_for_locale(
+						self.language.resolved().preference().unwrap_or("en-US"),
+					)
+				},
+				|(code, _)| code,
+			)
+	}
+	pub fn take_translation_key_request(&mut self) -> Option<translation::KeyRequest> {
+		let request = self.translation_key_request.take();
+		self.translation_key_busy |= request.is_some();
+		request
+	}
+	pub fn finish_translation_key(&mut self, result: Result<&'static str, &'static str>) {
+		self.translation_key_busy = false;
+		match result {
+			Ok(key) => self
+				.toasts
+				.push(design::Level::Success, i18n::translate(key)),
+			Err(key) => self.toasts.push(design::Level::Error, i18n::translate(key)),
+		}
 	}
 
 	/// Pending profile picture selection: (generation, own user, editor revision).
@@ -5642,17 +5695,11 @@ impl MessagingUi {
 				Err(message) => state.status = message,
 			}
 		}
-		let truncated = self.timeline.truncated_translation.is_some()
-			&& self.timeline.truncated_translation == self.timeline.browser_opening;
-		markdown::confirm_external_link_noting(
+		markdown::confirm_external_link(
 			&ctx,
 			&mut self.timeline.browser_opening,
 			self.reading_preferences.confirm_external_links,
-			truncated,
 		);
-		if !truncated || self.timeline.browser_opening.is_none() {
-			self.timeline.truncated_translation = None;
-		}
 		markdown::confirm_external_link(
 			&ctx,
 			&mut self.timeline.opening,

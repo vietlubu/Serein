@@ -32,6 +32,7 @@ pub mod server_integrations;
 pub mod server_invites;
 pub mod server_roles;
 pub mod server_settings;
+pub mod translation;
 pub use reading_preferences::ReadingPreferences;
 mod cache_preferences;
 pub use cache_preferences::*;

@@ -175,9 +175,10 @@ pub struct TimelineView {
 	pub(super) video: crate::video::VideoUi,
 	pub(super) opening: Option<String>,
 	pub(super) browser_opening: Option<String>,
-	/// The translation link whose message text was cut to fit. It applies only while it is
-	/// still the pending `browser_opening`, so any other link that replaces it drops the notice.
-	pub(super) truncated_translation: Option<String>,
+	/// Newest last; at most `MAX_SHOWN`.
+	pub(super) translations: Vec<crate::translation::Shown>,
+	pub(super) translating: Option<Id>,
+	pub(super) translation_request: Option<crate::translation::Request>,
 	/// Row whose menu Shift+F10 opened; it stays anchored to the row until it closes, even
 	/// after Shift is released and the More button returns.
 	keyboard_menu_row: Option<Id>,
@@ -1596,59 +1597,26 @@ pub(crate) fn action_button(
 	crate::icons::button_immediate(ui, icon, 28.0, label)
 }
 
-/// Whether Translate has text to send. The URL itself is built only when Translate is
-/// clicked, so hovering a message never serializes its text.
+/// Whether Globe has user text to translate.
 pub(crate) fn translatable(message: &Message) -> bool {
-	!crate::i18n::message_text(message).trim().is_empty()
+	!message.is_system() && !message.content.trim().is_empty()
 }
 
-/// Uses the existing reviewed external-link flow; no message text leaves Serein silently.
-/// Very large messages are bounded before constructing a browser URL; the flag is true when
-/// only the start of the text fits, so the confirmation can say so.
-pub(crate) fn translation_url(message: &Message) -> Option<(String, bool)> {
-	fn candidate(text: &str) -> Option<String> {
-		let mut url = url::Url::parse("https://translate.google.com/").ok()?;
-		url.query_pairs_mut()
-			.append_pair("sl", "auto")
-			.append_pair("tl", "en")
-			.append_pair("op", "translate")
-			.append_pair("text", text);
-		Some(url.into())
-	}
-	let text = crate::i18n::message_text(message);
-	let text = text.trim();
-	if text.is_empty() {
-		return None;
-	}
-	let mut high = text.len().min(2048);
-	while !text.is_char_boundary(high) {
-		high -= 1;
-	}
-	let mut boundaries: Vec<usize> = text
-		.char_indices()
-		.map(|(index, _)| index)
-		.filter(|index| *index <= high)
-		.chain(std::iter::once(high))
-		.collect();
-	boundaries.dedup();
-	high = boundaries.len() - 1;
-	let mut low = 0;
-	while low < high {
-		let middle = (low + high).div_ceil(2);
-		let end = boundaries[middle];
-		if candidate(&text[..end])?.len() <= 2048 {
-			low = middle;
-		} else {
-			high = middle - 1;
-		}
-	}
-	(low > 0).then(|| {
-		let end = boundaries[low];
-		(
-			candidate(&text[..end]).expect("validated translation URL"),
-			end < text.len(),
+/// Globe toggles between a message and its translation; a new request waits for the last one.
+pub(crate) fn globe_button(ui: &mut egui::Ui, translated: bool, idle: bool) -> bool {
+	ui.add_enabled_ui(translated || idle, |ui| {
+		action_button(
+			ui,
+			crate::icons::Icon::Globe,
+			if translated {
+				"timeline-message-actions-show-original"
+			} else {
+				"timeline-message-actions-translate"
+			},
 		)
 	})
+	.inner
+	.clicked()
 }
 
 /// One transient confirmation for all direct copy actions; never retains copied text.
@@ -2404,6 +2372,52 @@ fn show_system(
 	}
 }
 impl TimelineView {
+	/// Globe: hides a shown translation, or asks the app to translate when none is in flight.
+	pub(super) fn toggle_translation(&mut self, message: &Message) {
+		// Only a translation of the current text toggles off; a stale one after an edit retranslates.
+		let content = crate::translation::fingerprint(&message.content);
+		if let Some(index) = self
+			.translations
+			.iter()
+			.position(|shown| shown.message == message.id && shown.content == content)
+		{
+			self.translations.remove(index);
+			self.heights.remove(&message.id);
+		} else if self.translating.is_none() {
+			self.translating = Some(message.id);
+			self.translation_request = Some(crate::translation::Request {
+				message: message.id,
+				content,
+				text: message.content.clone(),
+			});
+		}
+	}
+	/// Stores a finished translation; returns the error key for the caller to show.
+	pub(super) fn finish_translation(
+		&mut self,
+		message: Id,
+		content: u64,
+		result: Result<String, &'static str>,
+	) -> Option<&'static str> {
+		if self.translating == Some(message) {
+			self.translating = None;
+		}
+		let text = match result {
+			Ok(text) => text,
+			Err(key) => return Some(key),
+		};
+		self.translations.retain(|shown| shown.message != message);
+		if self.translations.len() == crate::translation::MAX_SHOWN {
+			self.translations.remove(0);
+		}
+		self.translations.push(crate::translation::Shown {
+			message,
+			content,
+			text,
+		});
+		self.heights.remove(&message);
+		None
+	}
 	pub(super) fn show_fullscreen_video(&mut self, ctx: &egui::Context, state: &State) -> bool {
 		if self.video.is_fullscreen() {
 			// Runs before the timeline lays out, so the tweak is read directly.
@@ -2643,7 +2657,9 @@ impl TimelineView {
 				},
 				opening: self.opening.take(),
 				browser_opening: self.browser_opening.take(),
-				truncated_translation: self.truncated_translation.take(),
+				translations: std::mem::take(&mut self.translations),
+				translating: self.translating.take(),
+				translation_request: self.translation_request.take(),
 				pending_viewer: self.pending_viewer.take(),
 				jump: following,
 				leave_read: self.channel.zip(self.seen_latest),
@@ -4094,8 +4110,12 @@ impl TimelineView {
 											} else {
 												None
 											};
-											let formatted =
-												self.formatted.get(id, &message.content);
+											let source = crate::translation::shown(
+												&self.translations,
+												message,
+											)
+											.unwrap_or(&message.content);
+											let formatted = self.formatted.get(id, source);
 											let reveal = self
 												.revealed
 												.get(&id)
@@ -4308,6 +4328,28 @@ impl TimelineView {
 												ui.label(
 													RichText::new(crate::i18n::translate(
 														"timeline-show-with-scroll-edited",
+													))
+													.small()
+													.color(colors.muted),
+												);
+											}
+											if self.translating == Some(id) {
+												ui.label(
+													RichText::new(crate::i18n::translate(
+														"timeline-message-translating",
+													))
+													.small()
+													.color(colors.muted),
+												);
+											} else if crate::translation::shown(
+												&self.translations,
+												message,
+											)
+											.is_some()
+											{
+												ui.label(
+													RichText::new(crate::i18n::translate(
+														"timeline-message-translated",
 													))
 													.small()
 													.color(colors.muted),
@@ -5034,16 +5076,13 @@ impl TimelineView {
 									selected_reply = Some(id);
 								}
 								if translate
-									&& action_button(
+									&& globe_button(
 										&mut toolbar,
-										crate::icons::Icon::Globe,
-										"timeline-message-actions-translate",
-									)
-									.clicked() && let Some((url, truncated)) =
-									translation_url(message)
-								{
-									self.truncated_translation = truncated.then(|| url.clone());
-									self.browser_opening = Some(url);
+										crate::translation::shown(&self.translations, message)
+											.is_some(),
+										self.translating.is_none(),
+									) {
+									self.toggle_translation(message);
 								}
 							}
 							if react && !shift {
@@ -5078,15 +5117,12 @@ impl TimelineView {
 								);
 							}
 							if !shift
-								&& translate && action_button(
+								&& translate && globe_button(
 								&mut toolbar,
-								crate::icons::Icon::Globe,
-								"timeline-message-actions-translate",
-							)
-							.clicked() && let Some((url, truncated)) = translation_url(message)
-							{
-								self.truncated_translation = truncated.then(|| url.clone());
-								self.browser_opening = Some(url);
+								crate::translation::shown(&self.translations, message).is_some(),
+								self.translating.is_none(),
+							) {
+								self.toggle_translation(message);
 							}
 							if let Some((anchor, trigger)) = crate::reactions::add_button(
 								&mut toolbar,
@@ -8324,14 +8360,25 @@ mod tests {
 		for events in click(toolbar.left_center() + egui::vec2(104.0, 0.0), none) {
 			render(&mut view, &mut state, events, none);
 		}
-		let translate = view.browser_opening.take().expect("translation proposal");
-		let translate = url::Url::parse(&translate).unwrap();
-		assert_eq!(translate.host_str(), Some("translate.google.com"));
-		assert!(
-			translate
-				.query_pairs()
-				.any(|(key, value)| key == "text" && value == "Short")
+		let request = view
+			.translation_request
+			.take()
+			.expect("translation request");
+		assert_eq!(request.text, "Short");
+		assert_eq!(view.translating, Some(id));
+		assert_eq!(
+			view.finish_translation(id, request.content, Ok("Ngắn".into())),
+			None
 		);
+		let message = state.timeline.get(id).unwrap().clone();
+		assert_eq!(
+			crate::translation::shown(&view.translations, &message),
+			Some("Ngắn")
+		);
+		// Globe again restores the original without a new request.
+		view.toggle_translation(&message);
+		assert!(crate::translation::shown(&view.translations, &message).is_none());
+		assert!(view.translation_request.is_none());
 
 		// Shift hides quick reactions and More, adds direct utilities, and keeps Delete last.
 		let shift = egui::Modifiers::SHIFT;
@@ -8434,23 +8481,22 @@ mod tests {
 		assert_eq!(ctx.memory(|memory| memory.area_rect(menu_id)), anchored);
 	}
 	#[test]
-	fn translation_urls_include_encoded_text_and_fit_native_external_link_limits() {
-		let mut short = text_message(42);
-		short.content = "hola".into();
-		assert!(!translation_url(&short).expect("short text fits").1);
-		for content in ["x".repeat(4000), "🦀".repeat(1000)] {
-			let mut message = text_message(42);
-			message.content = content;
-			let (target, truncated) = translation_url(&message).expect("some text should fit");
-			assert!(truncated, "a shortened translation must be disclosed");
-			assert!(target.len() <= 2048, "{} bytes", target.len());
-			let target = url::Url::parse(&target).unwrap();
-			assert!(
-				target
-					.query_pairs()
-					.any(|(key, value)| { key == "text" && value.chars().next().is_some() })
-			);
-		}
+	fn translation_is_dropped_when_the_message_is_edited() {
+		let mut view = TimelineView::default();
+		let mut message = text_message(42);
+		message.content = "Bonjour".into();
+		view.toggle_translation(&message);
+		let request = view.translation_request.take().unwrap();
+		view.finish_translation(message.id, request.content, Ok("Hello".into()));
+		assert_eq!(
+			crate::translation::shown(&view.translations, &message),
+			Some("Hello")
+		);
+		// A stale translation must never hide an edit.
+		message.content = "Bonjour !".into();
+		assert!(crate::translation::shown(&view.translations, &message).is_none());
+		view.toggle_translation(&message);
+		assert_eq!(view.translation_request.unwrap().text, "Bonjour !");
 	}
 
 	#[test]

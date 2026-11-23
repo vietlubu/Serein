@@ -109,6 +109,14 @@ pub struct AppPreferences {
 	pub image_cache: model::CachePreferences,
 	/// Clock style for message times; older preferences follow the language.
 	pub time_format: model::TimeFormat,
+	/// Translation target code; `None` follows the interface language, as in older preferences.
+	pub translation_language: Option<String>,
+	/// Service used by the Globe action; older preferences deserialize with Google.
+	pub translation_engine: model::translation::TranslationEngine,
+	/// OpenAI-compatible chat completions URL; older preferences get the OpenAI default.
+	pub translation_endpoint: String,
+	/// Model name sent to the OpenAI-compatible endpoint.
+	pub translation_model: String,
 	/// Owner opt-in diagnostic log; older preferences deserialize with logging off.
 	pub diagnostics_log: diagnostics::Level,
 	/// First-run setup finished or skipped; absent in older preferences, so existing installs
@@ -161,6 +169,10 @@ impl Default for AppPreferences {
 			cosmetics: Default::default(),
 			image_cache: Default::default(),
 			time_format: Default::default(),
+			translation_language: None,
+			translation_engine: Default::default(),
+			translation_endpoint: "https://api.openai.com/v1/chat/completions".into(),
+			translation_model: "gpt-4o-mini".into(),
 			diagnostics_log: diagnostics::Level::Off,
 			setup_done: false,
 		}
@@ -168,14 +180,22 @@ impl Default for AppPreferences {
 }
 impl AppPreferences {
 	pub fn is_valid(&self) -> bool {
-		self.window_geometry.is_none_or(WindowGeometry::is_valid)
-			&& self.language.as_ref().is_none_or(|language| {
-				!language.is_empty()
-					&& language.len() <= 35
-					&& language
+		// Unknown but well-formed tags stay valid so a newer build's choice never drops the row.
+		let tag = |value: &Option<String>| {
+			value.as_ref().is_none_or(|tag| {
+				!tag.is_empty()
+					&& tag.len() <= 35
+					&& tag
 						.bytes()
 						.all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
-			}) && self.transparency <= 100
+			})
+		};
+		self.window_geometry.is_none_or(WindowGeometry::is_valid)
+			&& tag(&self.language)
+			&& tag(&self.translation_language)
+			&& self.translation_endpoint.len() <= 1024
+			&& self.translation_model.len() <= 512
+			&& self.transparency <= 100
 			&& self.blur <= 100
 			&& self.input_percent <= 200
 			&& self.output_percent <= 200

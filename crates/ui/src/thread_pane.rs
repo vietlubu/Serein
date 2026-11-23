@@ -1055,16 +1055,12 @@ impl ThreadPaneUi {
 			);
 		}
 		if translate
-			&& crate::timeline::action_button(
+			&& crate::timeline::globe_button(
 				&mut toolbar,
-				icons::Icon::Globe,
-				"timeline-message-actions-translate",
-			)
-			.clicked()
-			&& let Some((url, truncated)) = crate::timeline::translation_url(message)
-		{
-			timeline.truncated_translation = truncated.then(|| url.clone());
-			timeline.browser_opening = Some(url);
+				crate::translation::shown(&timeline.translations, message).is_some(),
+				timeline.translating.is_none(),
+			) {
+			timeline.toggle_translation(message);
 		}
 		if let Some((anchor, trigger)) =
 			crate::reactions::add_button(&mut toolbar, react, state.reactions.busy())
@@ -1173,7 +1169,11 @@ impl ThreadPaneUi {
 		let mut surface = crate::select::Surface::new(ui, "thread-pane");
 		let mut revealed = 0u32;
 		self.formats
-			.get(message.id, &message.content)
+			.get(
+				message.id,
+				crate::translation::shown(&timeline.translations, message)
+					.unwrap_or(&message.content),
+			)
 			.show_references(
 				ui,
 				&mut self.opening,
@@ -1255,6 +1255,19 @@ impl ThreadPaneUi {
 		if message.edited {
 			ui.label(
 				RichText::new(crate::i18n::translate("timeline-show-with-scroll-edited"))
+					.small()
+					.color(colors.muted),
+			);
+		}
+		if timeline.translating == Some(message.id) {
+			ui.label(
+				RichText::new(crate::i18n::translate("timeline-message-translating"))
+					.small()
+					.color(colors.muted),
+			);
+		} else if crate::translation::shown(&timeline.translations, message).is_some() {
+			ui.label(
+				RichText::new(crate::i18n::translate("timeline-message-translated"))
 					.small()
 					.color(colors.muted),
 			);
