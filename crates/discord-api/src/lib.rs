@@ -33,6 +33,7 @@ mod server_invites;
 mod server_roles;
 mod server_settings;
 pub mod spotify;
+pub mod translate;
 pub mod upload;
 mod user_actions;
 use client_core::{

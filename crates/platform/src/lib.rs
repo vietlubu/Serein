@@ -21,6 +21,7 @@ pub mod save;
 pub mod single_instance;
 pub mod startup;
 pub mod system_theme;
+pub mod translation_key;
 pub mod tray;
 pub mod video;
 #[cfg(target_os = "macos")]

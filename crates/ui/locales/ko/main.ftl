@@ -1745,8 +1745,6 @@ markdown-confirm-external-link-open-external-link = 외부 링크를 열까요?
 # Context: confirm_external_link
 markdown-confirm-external-link-open-in-browser = 브라우저에서 열기
 # Context: confirm_external_link
-markdown-confirm-external-link-only-the-start-fits = 링크에는 이 메시지의 앞부분만 포함되며 나머지는 전송되지 않습니다. 이 주소는 기본 브라우저에서 열립니다.
-# Context: confirm_external_link
 markdown-confirm-external-link-this-destination-opens-in-your-default-browser = 이 주소는 기본 브라우저에서 열립니다.
 # Context: show_emoji
 markdown-show-emoji-copy-emoji = 이모지 복사
@@ -3962,7 +3960,10 @@ timeline-message-actions-mark-unread = 읽지 않음으로 표시
 timeline-message-actions-pin-message = 메시지 고정
 # Context: message_actions
 timeline-message-actions-reply = 답장
-timeline-message-actions-translate = 번역(브라우저에서 열기)
+timeline-message-actions-translate = 번역
+timeline-message-actions-show-original = 원문 보기
+timeline-message-translated = (번역됨)
+timeline-message-translating = 번역 중…
 # Context: message_actions
 timeline-message-actions-unpin-message = 메시지 고정 해제
 # Context: message_actions
@@ -5025,6 +5026,29 @@ time-format-group = 시간 형식
 time-format-auto = 자동
 time-format-12-hour = 12시간제
 time-format-24-hour = 24시간제
+translation-group = 메시지 번역
+translation-language-label = 번역할 언어
+translation-language-description = 메시지의 지구본 버튼은 해당 메시지의 텍스트만 선택한 서비스로 보냅니다.
+translation-language-follow = Serein 언어와 같게
+translation-engine-google = Google 번역
+translation-engine-google-description = 비공식 무료 엔드포인트입니다. 키가 필요 없으며 요청이 제한될 수 있습니다.
+translation-engine-openai = OpenAI 호환 API
+translation-endpoint-label = 엔드포인트
+translation-model-label = 모델
+translation-key-label = API 키
+translation-key-description = OS 자격 증명 저장소에만 저장됩니다.
+translation-key-save = 키 저장
+translation-key-remove = 키 삭제
+translation-key-saved = API 키를 저장했습니다.
+translation-key-removed = API 키를 삭제했습니다.
+translation-key-failed = OS 자격 증명 저장소를 사용할 수 없습니다.
+translation-error-network = 번역 실패: 서비스에 연결할 수 없습니다.
+translation-error-rate-limited = 번역 실패: 서비스가 요청을 제한하고 있습니다. 나중에 다시 시도하세요.
+translation-error-unauthorized = 번역 실패: API 키가 거부되었습니다.
+translation-error-missing-key = 번역 실패: 먼저 설정에서 API 키를 저장하세요.
+translation-error-endpoint = 번역 실패: 엔드포인트는 https이거나 localhost의 http여야 합니다.
+translation-error-too-long = 번역 실패: 메시지가 너무 깁니다.
+translation-error-response = 번역 실패: 서비스가 예상치 못한 응답을 반환했습니다.
 profiles-status-edit = 상태 편집
 profiles-status-clear = 상태 지우기
 send-throttled-title = 잠깐만요, 너무 빠른걸요

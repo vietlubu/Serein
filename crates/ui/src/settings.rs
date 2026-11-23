@@ -853,11 +853,120 @@ impl MessagingUi {
 				}
 			}
 		});
+		self.translation_settings(ui);
 		let format = (self.time_format, self.language);
 		if self.settings.language_time_format != Some(format) {
 			crate::local_time::set_format(self.time_format, self.language);
 			self.settings.language_time_format = Some(format);
 		}
+	}
+
+	fn translation_settings(&mut self, ui: &mut egui::Ui) {
+		use model::translation::{LANGUAGES, TranslationEngine, language as target};
+		let language = self.language;
+		let title = language.text("translation-group");
+		design::group(ui, &title, |ui| {
+			let label = language.text("translation-language-label");
+			let description = language.text("translation-language-description");
+			let follow = language.text("translation-language-follow");
+			design::row(ui, &label, Some(&description), |ui| {
+				let selected = self
+					.translation_language
+					.as_deref()
+					.and_then(target)
+					.map_or(follow.as_str(), |(_, name)| name);
+				crate::design::Select::from_id_salt("translation-language")
+					.selected_text(selected)
+					.width(ui.available_width().min(220.0))
+					.show_ui(ui, |ui| {
+						ui.selectable_value(&mut self.translation_language, None, &follow);
+						for (code, name) in LANGUAGES {
+							ui.selectable_value(
+								&mut self.translation_language,
+								Some((*code).to_owned()),
+								*name,
+							);
+						}
+					});
+			});
+			let google = language.text("translation-engine-google-description");
+			for (engine, key, detail) in [
+				(
+					TranslationEngine::Google,
+					"translation-engine-google",
+					Some(google.as_str()),
+				),
+				(
+					TranslationEngine::OpenAiCompatible,
+					"translation-engine-openai",
+					None,
+				),
+			] {
+				if design::radio_row(
+					ui,
+					self.translation_engine == engine,
+					&language.text(key),
+					detail,
+				)
+				.clicked()
+				{
+					self.translation_engine = engine;
+				}
+			}
+			if self.translation_engine != TranslationEngine::OpenAiCompatible {
+				return;
+			}
+			design::row(
+				ui,
+				&language.text("translation-endpoint-label"),
+				None,
+				|ui| {
+					design::input(
+						ui,
+						egui::TextEdit::singleline(&mut self.translation_endpoint).char_limit(256),
+					)
+				},
+			);
+			design::row(ui, &language.text("translation-model-label"), None, |ui| {
+				design::input(
+					ui,
+					egui::TextEdit::singleline(&mut self.translation_model).char_limit(128),
+				)
+			});
+			let label = language.text("translation-key-label");
+			let description = language.text("translation-key-description");
+			design::row(ui, &label, Some(&description), |ui| {
+				let mut edit = egui::TextEdit::singleline(&mut *self.translation_key_draft)
+					.password(true)
+					.char_limit(4096)
+					.id_salt("translation-key")
+					.show(ui);
+				// Password masking still records raw text in egui's persistent undo history.
+				edit.state.clear_undoer();
+				edit.state.store(ui.ctx(), edit.response.id);
+			});
+			ui.add_enabled_ui(!self.translation_key_busy, |ui| {
+				ui.horizontal(|ui| {
+					let filled = !self.translation_key_draft.trim().is_empty();
+					if ui
+						.add_enabled_ui(filled, |ui| {
+							design::button(ui, "translation-key-save", design::ButtonKind::Outline)
+						})
+						.inner
+						.clicked()
+					{
+						self.translation_key_request = Some(crate::translation::KeyRequest::Save(
+							std::mem::take(&mut self.translation_key_draft),
+						));
+					}
+					if design::button(ui, "translation-key-remove", design::ButtonKind::Outline)
+						.clicked()
+					{
+						self.translation_key_request = Some(crate::translation::KeyRequest::Forget);
+					}
+				});
+			});
+		});
 	}
 
 	/// Open at login and start minimised; shared by Settings > General and setup.

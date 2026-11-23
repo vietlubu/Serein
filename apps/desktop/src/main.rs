@@ -61,6 +61,7 @@ mod startup;
 mod sticker_upload;
 mod summary;
 mod toggle_setting;
+mod translation;
 mod tray_window;
 mod updater;
 mod uploads;
@@ -1136,6 +1137,9 @@ struct Desktop {
 	diagnostics_save: Option<std::sync::mpsc::Receiver<Option<Result<std::path::PathBuf, ()>>>>,
 	/// The running `/summary` worker: conversation, request and its answer.
 	summary: Option<(model::Id, u64, summary::Answer)>,
+	/// The running Globe translation: message, content fingerprint and its answer.
+	translation: Option<(model::Id, u64, translation::Answer)>,
+	translation_key: Option<translation::KeyAnswer>,
 	account_presences: std::collections::BTreeMap<model::Id, model::OwnPresence>,
 	presence_load_pending: bool,
 	deferred_connect: Option<(SessionSecret, bool)>,
@@ -2670,6 +2674,8 @@ impl Desktop {
 			log_open_refused: false,
 			diagnostics_save: None,
 			summary: None,
+			translation: None,
+			translation_key: None,
 			account_presences: std::collections::BTreeMap::new(),
 			presence_load_pending,
 			deferred_connect: None,
@@ -2986,6 +2992,57 @@ impl Desktop {
 		let result =
 			result.map(|text| summary::reply(channel, request, self.state.user.as_ref(), &text));
 		self.state.finish_summary(channel, request, result);
+	}
+	/// Runs the one Globe translation and API-key change the UI allows in flight.
+	fn sync_translation(&mut self, ctx: &egui::Context) {
+		if self.translation.is_none()
+			&& let Some(request) = self.messaging.take_translation_request()
+		{
+			let answer = translation::spawn(
+				self.runtime.handle(),
+				ctx,
+				self.state.demo,
+				request.text,
+				self.messaging.translation_target(),
+				self.messaging.translation_engine,
+				self.messaging.translation_endpoint.clone(),
+				self.messaging.translation_model.clone(),
+			);
+			self.translation = Some((request.message, request.content, answer));
+		}
+		if let Some((message, content, answer)) = &self.translation {
+			let result = match answer.try_recv() {
+				Ok(result) => Some(result),
+				Err(std::sync::mpsc::TryRecvError::Empty) => None,
+				Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+					Some(Err("translation-error-network"))
+				}
+			};
+			if let Some(result) = result {
+				let (message, content) = (*message, *content);
+				self.translation = None;
+				self.messaging.finish_translation(message, content, result);
+			}
+		}
+		if self.translation_key.is_none()
+			&& let Some(request) = self.messaging.take_translation_key_request()
+		{
+			self.translation_key = Some(translation::spawn_key(
+				self.runtime.handle(),
+				ctx,
+				self.state.demo,
+				request,
+			));
+		}
+		if let Some(answer) = &self.translation_key {
+			let result = match answer.try_recv() {
+				Ok(result) => result,
+				Err(std::sync::mpsc::TryRecvError::Empty) => return,
+				Err(std::sync::mpsc::TryRecvError::Disconnected) => Err("translation-key-failed"),
+			};
+			self.translation_key = None;
+			self.messaging.finish_translation_key(result);
+		}
 	}
 	fn save_app_preferences(&mut self) {
 		if self.fixture_only || self.state.demo {
@@ -5308,6 +5365,7 @@ impl Desktop {
 		self.sync_diagnostics_log(ctx);
 		self.sync_diagnostics_save(ctx);
 		self.sync_summary(ctx);
+		self.sync_translation(ctx);
 		let mut results = Vec::new();
 		if let Some(store) = &mut self.store {
 			for _ in 0..4 {

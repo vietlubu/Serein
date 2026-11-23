@@ -64,3 +64,10 @@ insert into another draft.
 A concurrent writer restoring identical metadata remains outside observable file
 change detection. The dialog offers explicit Copy/Add actions and never sends a
 Discord message automatically. Cancellation can leave remote bytes without a link.
+
+Explicit message translation adds Google's unofficial `translate.googleapis.com` endpoint, or
+the owner-configured OpenAI-compatible endpoint, as a third-party recipient of the text of one
+message per Globe click. Nothing is translated automatically or in the background. The
+credential-free transport is separate from Discord transports, refuses redirects/retries and
+bounds request and response sizes. The optional API key is read from the OS credential store
+only for that request and is sent only over HTTPS, or plain HTTP to loopback hosts.

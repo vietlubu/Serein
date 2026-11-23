@@ -1775,8 +1775,6 @@ markdown-confirm-external-link-open-external-link = Open external link?
 # Context: confirm_external_link
 markdown-confirm-external-link-open-in-browser = Open in Browser
 # Context: confirm_external_link
-markdown-confirm-external-link-only-the-start-fits = Only the start of this message fits in the link; the rest is not sent. This destination opens in your default browser.
-# Context: confirm_external_link
 markdown-confirm-external-link-this-destination-opens-in-your-default-browser = This destination opens in your default browser.
 # Context: show_emoji
 markdown-show-emoji-copy-emoji = Copy emoji
@@ -4007,7 +4005,10 @@ timeline-message-actions-mark-unread = Mark Unread
 timeline-message-actions-pin-message = Pin message
 # Context: message_actions
 timeline-message-actions-reply = Reply
-timeline-message-actions-translate = Translate (opens browser)
+timeline-message-actions-translate = Translate
+timeline-message-actions-show-original = Show original
+timeline-message-translated = (translated)
+timeline-message-translating = Translating…
 # Context: message_actions
 timeline-message-actions-unpin-message = Unpin message
 # Context: message_actions
@@ -5089,6 +5090,29 @@ time-format-group = Time format
 time-format-auto = Auto
 time-format-12-hour = 12-hour
 time-format-24-hour = 24-hour
+translation-group = Message translation
+translation-language-label = Translate to
+translation-language-description = Globe on a message sends only that message's text to the selected service.
+translation-language-follow = Same as Serein's language
+translation-engine-google = Google Translate
+translation-engine-google-description = Unofficial free endpoint; no key; may be rate-limited.
+translation-engine-openai = OpenAI-compatible API
+translation-endpoint-label = Endpoint
+translation-model-label = Model
+translation-key-label = API key
+translation-key-description = Stored only in the OS credential store.
+translation-key-save = Save key
+translation-key-remove = Remove key
+translation-key-saved = API key saved.
+translation-key-removed = API key removed.
+translation-key-failed = The OS credential store is unavailable.
+translation-error-network = Translation failed: the service could not be reached.
+translation-error-rate-limited = Translation failed: the service is rate-limiting requests. Try again later.
+translation-error-unauthorized = Translation failed: the API key was rejected.
+translation-error-missing-key = Translation failed: save an API key in Settings first.
+translation-error-endpoint = Translation failed: the endpoint must be https, or http on localhost.
+translation-error-too-long = Translation failed: the message is too long.
+translation-error-response = Translation failed: the service returned an unexpected answer.
 profiles-status-edit = Edit status
 profiles-status-clear = Clear status
 send-throttled-title = Woah there. Way too spicy

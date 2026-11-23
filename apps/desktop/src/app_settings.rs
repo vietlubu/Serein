@@ -88,6 +88,10 @@ impl Settings {
 			cosmetics: ui.cosmetics,
 			image_cache: ui.image_cache,
 			time_format: ui.time_format,
+			translation_language: ui.translation_language.clone(),
+			translation_engine: ui.translation_engine,
+			translation_endpoint: ui.translation_endpoint.clone(),
+			translation_model: ui.translation_model.clone(),
 			diagnostics_log: ui.diagnostics_log,
 			setup_done: !ui.setup_pending,
 		};
@@ -147,6 +151,10 @@ impl Settings {
 		ui.cosmetics = value.cosmetics;
 		ui.image_cache = value.image_cache;
 		ui.time_format = value.time_format;
+		ui.translation_language = value.translation_language.clone();
+		ui.translation_engine = value.translation_engine;
+		ui.translation_endpoint = value.translation_endpoint.clone();
+		ui.translation_model = value.translation_model.clone();
 		ui.diagnostics_log = value.diagnostics_log;
 		// Unreadable preferences fall back to defaults; never nag with setup on every launch.
 		ui.setup_pending = self.loaded && !value.setup_done;
