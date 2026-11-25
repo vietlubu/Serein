@@ -11,6 +11,7 @@ pub mod game_mentions;
 pub mod gifs;
 pub mod guild_creation;
 pub mod guild_folders;
+pub mod inbox;
 pub mod permissions;
 pub mod stickers;
 pub use permissions::ChannelAccess;
@@ -204,6 +205,16 @@ pub enum Command {
 		request: u64,
 	},
 	CancelSearch,
+	/// Inbox list or unread preview read (unofficial user routes).
+	Inbox {
+		request: u64,
+		read: inbox::Read,
+	},
+	/// Bookmark/reminder save, unsave, or recent-mention acknowledgement.
+	InboxWrite {
+		request: u64,
+		write: inbox::Write,
+	},
 	/// The message the selected thread hangs off, read from its parent channel.
 	ThreadStarter {
 		thread: Id,
@@ -607,6 +618,16 @@ pub enum Event {
 		request: u64,
 		result: Result<search::Outcome, auth::Failure>,
 	},
+	Inbox {
+		request: u64,
+		read: inbox::Read,
+		result: Result<inbox::Outcome, auth::Failure>,
+	},
+	InboxWritten {
+		request: u64,
+		write: inbox::Write,
+		result: Result<(), auth::Failure>,
+	},
 	Gifs {
 		request: u64,
 		result: Result<model::GifPage, auth::Failure>,
@@ -848,6 +869,13 @@ pub struct State {
 	pub thread_previews: thread_previews::Previews,
 	pub search: Option<search::SearchView>,
 	pub search_request: u64,
+	pub inbox: Option<inbox::InboxView>,
+	pub inbox_request: u64,
+	/// The one inbox write in flight; serialized so removals never race.
+	#[doc(hidden)]
+	pub inbox_pending: Option<u64>,
+	/// A save succeeded; an open Bookmarks or Reminders tab should reload once.
+	pub inbox_changed: bool,
 	pub gifs: gifs::Gifs,
 	pub emoji_frecency: emoji_frecency::EmojiFrecency,
 	/// A pin changed in this channel; the pins view should be reloaded once.
@@ -1099,6 +1127,10 @@ impl Default for State {
 			thread_previews: Default::default(),
 			search: None,
 			search_request: 0,
+			inbox: None,
+			inbox_request: 0,
+			inbox_pending: None,
+			inbox_changed: false,
 			gifs: gifs::Gifs::default(),
 			emoji_frecency: emoji_frecency::EmojiFrecency::default(),
 			pins_changed: None,
@@ -2526,6 +2558,14 @@ impl State {
 			self.apply_search(channel, request, Err(auth::Failure::Capacity));
 			return;
 		}
+		if let Command::Inbox { request, read } = command {
+			self.apply_inbox(request, read, Err(auth::Failure::Capacity));
+			return;
+		}
+		if let Command::InboxWrite { request, write } = command {
+			self.apply_inbox_write(request, write, Err(auth::Failure::Capacity));
+			return;
+		}
 		if matches!(command, Command::CancelSearch | Command::CancelGifs) {
 			return;
 		}
@@ -3189,6 +3229,22 @@ impl State {
 				result,
 			} => {
 				self.apply_search(channel, request, result);
+				Ok(())
+			}
+			Event::Inbox {
+				request,
+				read,
+				result,
+			} => {
+				self.apply_inbox(request, read, result);
+				Ok(())
+			}
+			Event::InboxWritten {
+				request,
+				write,
+				result,
+			} => {
+				self.apply_inbox_write(request, write, result);
 				Ok(())
 			}
 			Event::StickerEntitlement { user, premium_type } => {
@@ -4544,6 +4600,8 @@ impl State {
 			self.clear_direct_presences();
 			self.clear_cached_history();
 			self.clear_search();
+			self.inbox = None;
+			self.inbox_pending = None;
 			self.search_target = None;
 			self.read_state.cancel();
 			self.clear_profile();
@@ -4788,6 +4846,14 @@ impl Event {
 				Self::PostCreated { result, .. } => result.as_ref().map_or(0, Channel::bytes),
 				Self::Search {
 					result: Ok(search::Outcome::Page(page) | search::Outcome::Pins(page)),
+					..
+				} => page.bytes(),
+				Self::Inbox {
+					result: Ok(inbox::Outcome::Page(page)),
+					..
+				} => page.bytes(),
+				Self::Inbox {
+					result: Ok(inbox::Outcome::Unread(page)),
 					..
 				} => page.bytes(),
 				Self::Gifs {

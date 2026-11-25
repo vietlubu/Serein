@@ -1,5 +1,26 @@
 # Discord compatibility — checked 2026-09-10
 
+## Inbox: unread, mentions, bookmarks and reminders (November 25, 2026)
+
+The header tray opens an Inbox popout. Its routes were observed by the owner in Discord's web
+client; all are **unofficial** user routes and **unverified** in Serein:
+
+- Mentions: `GET /users/@me/mentions?limit=25&roles=true&everyone=true[&before={id}]`; ids must
+  descend and advance past the cursor. Mark as read sends `DELETE /users/@me/mentions/{id}`,
+  taken from docs.discord.food and not captured by the owner.
+- Bookmarks: `GET /users/@me/saved-messages/bookmarks?limit=25`; older pages send the last
+  `saved_at` (RFC3339) as `before`, a guess the owner approved. A page that does not advance is
+  an error, not a loop.
+- Reminders: `GET /users/@me/saved-messages?bookmark_ids=true`, unpaginated, at most 100.
+- Save, reminder and edit: `PUT /users/@me/saved-messages/{channel}/{message}` with
+  `source` and an optional millisecond `due_at`; remove/complete is `DELETE` on that path.
+- Unread previews: `GET /channels/{channel}/messages?limit=30&around={read marker}` for the
+  bounded unread conversations already known to the session, one at a time as cards scroll in.
+
+Saved messages whose message is `null` (deleted) are hidden. Bookmarks may need Nitro; Serein
+does not gate them and shows Discord's failure. Each page and all held previews are bounded to
+2 MiB. Synthetic tests only; no live account was used.
+
 ## Game mentions (October 14, 2026)
 
 The native composer offers `@game`, a searchable game catalog and application references

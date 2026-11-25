@@ -23,6 +23,7 @@ pub use graphics::{GpuPreference, GraphicsApi};
 mod time_format;
 pub use time_format::TimeFormat;
 pub mod guild_folders;
+pub mod inbox;
 pub mod message_options;
 pub mod permissions;
 mod reading_preferences;

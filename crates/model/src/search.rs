@@ -114,6 +114,28 @@ pub struct SearchPage {
 	/// Oldest pin timestamp in nanoseconds, only when more pins are available.
 	pub pin_cursor: Option<i128>,
 }
+pub(crate) fn hit_bytes(h: &SearchHit) -> usize {
+	h.author.heap_bytes()
+		+ crate::mention_bytes(&h.mentions)
+		+ h.excerpt.capacity()
+		+ h.attachments.capacity() * size_of::<crate::Attachment>()
+		+ h.attachments
+			.iter()
+			.map(crate::Attachment::bytes)
+			.sum::<usize>()
+		+ h.embeds.capacity() * size_of::<crate::Embed>()
+		+ h.embeds.iter().map(crate::Embed::bytes).sum::<usize>()
+}
+/// Per-hit bounds; channel scope is checked by the caller.
+pub(crate) fn valid_hit(h: &SearchHit) -> bool {
+	h.id.0 > 0
+		&& h.channel.0 > 0
+		&& h.author.name.len() <= 512
+		&& crate::valid_mentions(&h.mentions)
+		&& h.attachments.len() <= crate::MAX_ATTACHMENTS
+		&& h.embeds.len() <= crate::MAX_EMBEDS
+		&& h.excerpt.len() <= 8192
+}
 impl SearchPage {
 	/// Drop media from the last hits until the page fits its byte budget, so a page of
 	/// attachment-heavy messages keeps every excerpt instead of failing as a whole.
@@ -129,21 +151,7 @@ impl SearchPage {
 	}
 	pub fn bytes(&self) -> usize {
 		self.hits.capacity() * size_of::<SearchHit>()
-			+ self
-				.hits
-				.iter()
-				.map(|h| {
-					h.author.heap_bytes()
-						+ crate::mention_bytes(&h.mentions)
-						+ h.excerpt.capacity()
-						+ h.attachments.capacity() * size_of::<crate::Attachment>()
-						+ h.attachments
-							.iter()
-							.map(crate::Attachment::bytes)
-							.sum::<usize>() + h.embeds.capacity() * size_of::<crate::Embed>()
-						+ h.embeds.iter().map(crate::Embed::bytes).sum::<usize>()
-				})
-				.sum::<usize>()
+			+ self.hits.iter().map(hit_bytes).sum::<usize>()
 	}
 	/// `channel` is `None` for a server-wide search, whose hits may come from any channel.
 	/// Hits follow the requested order: newest first, or oldest first.
@@ -171,20 +179,15 @@ impl SearchPage {
 	fn valid_hits(&self, channel: Option<Id>) -> bool {
 		self.hits.len() <= SEARCH_PAGE_SIZE
 			&& self.bytes() <= MAX_SEARCH_BYTES
-			&& self.hits.iter().all(|h| {
-				h.id.0 > 0
-					&& h.channel.0 > 0
-					&& channel.is_none_or(|channel| h.channel == channel)
-					&& h.author.name.len() <= 512
-					&& crate::valid_mentions(&h.mentions)
-					&& h.attachments.len() <= crate::MAX_ATTACHMENTS
-					&& h.embeds.len() <= crate::MAX_EMBEDS
-					&& h.excerpt.len() <= 8192
-			}) && self
-			.hits
-			.iter()
-			.enumerate()
-			.all(|(i, h)| self.hits[..i].iter().all(|other| other.id != h.id))
+			&& self
+				.hits
+				.iter()
+				.all(|h| valid_hit(h) && channel.is_none_or(|channel| h.channel == channel))
+			&& self
+				.hits
+				.iter()
+				.enumerate()
+				.all(|(i, h)| self.hits[..i].iter().all(|other| other.id != h.id))
 	}
 }
 

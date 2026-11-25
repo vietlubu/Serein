@@ -1586,6 +1586,7 @@ fn demo_fetch(command: &Command) -> bool {
 		| Command::Archives { .. }
 		| Command::Pins { .. }
 		| Command::Search { .. }
+		| Command::Inbox { .. }
 		| Command::ThreadStarter { .. }
 		| Command::ThreadPreview { .. }
 		| Command::ThreadPane { .. }
@@ -4618,6 +4619,58 @@ impl Desktop {
 						})),
 					}
 				}
+				Command::Inbox { request, read } => {
+					use client_core::inbox::{Outcome, Read};
+					let selected = self.state.selected.unwrap_or(model::Id(1));
+					let hit = |id: u64, channel: model::Id| {
+						let message = test_support::message(id, channel);
+						model::SearchHit {
+							id: message.id,
+							channel,
+							excerpt: message.content,
+							author: message.author,
+							mentions: message.mentions,
+							attachments: message.attachments,
+							embeds: message.embeds,
+							forwarded: message.forwarded,
+							forward_origin: message.forward_origin,
+						}
+					};
+					let result = match read {
+						Read::Unread { channel, around } => {
+							let first = around.map_or(491, |m| m.0 + 1);
+							Outcome::Unread(model::SearchPage {
+								hits: vec![hit(first, channel), hit(first + 1, channel)],
+								total: 0,
+								partial: false,
+								pin_cursor: None,
+							})
+						}
+						Read::Mentions { .. } | Read::Bookmarks { .. } | Read::Reminders => {
+							let guild = self.state.channel(selected).and_then(|c| c.guild);
+							let saved_at = Some(1_788_998_400_000_000_000);
+							Outcome::Page(model::inbox::InboxPage {
+								items: [480, 470, 460]
+									.into_iter()
+									.map(|id| model::inbox::InboxItem {
+										hit: hit(id, selected),
+										guild,
+										saved_at,
+										due_at: (read == Read::Reminders).then_some(
+											1_788_998_400_000_000_000 + id as i128 * 60_000_000_000,
+										),
+									})
+									.collect(),
+								more: false,
+							})
+						}
+					};
+					Event::Inbox {
+						request,
+						read,
+						result: Ok(result),
+					}
+				}
 				Command::Search {
 					channel,
 					query,
@@ -4989,6 +5042,11 @@ impl Desktop {
 					channel,
 					message,
 					pinned,
+					result: Ok(()),
+				},
+				Command::InboxWrite { request, write } => Event::InboxWritten {
+					request,
+					write,
 					result: Ok(()),
 				},
 				Command::SuppressEmbeds {

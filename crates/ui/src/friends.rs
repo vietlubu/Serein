@@ -459,6 +459,9 @@ impl MessagingUi {
 							self.friends.query.clear();
 						}
 					}
+					ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+						self.inbox_button(ui)
+					});
 				});
 			});
 		ui.separator();

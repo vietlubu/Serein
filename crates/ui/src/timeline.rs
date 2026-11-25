@@ -114,6 +114,11 @@ pub struct TimelineView {
 	pub(super) quick_reaction_used: Option<&'static str>,
 	/// Requested pin change: channel, message, pinned.
 	pub(super) pin_request: Option<(Id, Id, bool)>,
+	/// Requested bookmark or reminder: channel, message, reminder due in Unix ns (`None`
+	/// bookmarks).
+	pub(super) save_request: Option<(Id, Id, Option<i128>)>,
+	/// Create Reminder > Custom… chosen: channel, message.
+	pub(super) reminder_custom: Option<(Id, Id)>,
 	/// Requested embed removal: channel, message, and whether Shift skipped the confirmation.
 	pub(super) suppress_embeds: Option<(Id, Id, bool)>,
 	/// Requested new thread: parent channel and the message that starts it.
@@ -1832,6 +1837,8 @@ pub(crate) fn message_actions(
 	editing: (&mut Option<(Id, Id, String)>, &mut bool),
 	deleting: &mut Option<(Id, Id)>,
 	pin: (bool, bool, &mut Option<(Id, Id, bool)>),
+	// `None` hides Bookmark Message and Create Reminder.
+	save: Option<(&mut Option<(Id, Id, Option<i128>)>, &mut Option<(Id, Id)>)>,
 	thread: (bool, &mut Option<(Id, Id)>),
 	forward: (bool, &mut Option<Id>),
 	view_reactions: Option<(
@@ -1986,6 +1993,36 @@ pub(crate) fn message_actions(
 		{
 			*pin_request = Some((message.channel, message.id, !pinned));
 			ui.close();
+		}
+		if let Some((save_request, reminder_custom)) = save {
+			if ui
+				.button(crate::i18n::translate(
+					"timeline-message-actions-bookmark-message",
+				))
+				.clicked()
+			{
+				*save_request = Some((message.channel, message.id, None));
+				ui.close();
+			}
+			ui.menu_button(
+				crate::i18n::translate("timeline-message-actions-create-reminder"),
+				|ui| {
+					for at in crate::search::RemindAt::ALL {
+						if ui.button(crate::i18n::translate(at.label())).clicked() {
+							*save_request = Some((message.channel, message.id, Some(at.due())));
+							ui.close();
+						}
+					}
+					ui.separator();
+					if ui
+						.button(crate::i18n::translate("inbox-remind-custom"))
+						.clicked()
+					{
+						*reminder_custom = Some((message.channel, message.id));
+						ui.close();
+					}
+				},
+			);
 		}
 		if own || can_delete {
 			ui.separator();
@@ -5260,6 +5297,9 @@ impl TimelineView {
 									state.is_pinned(message.channel, id),
 									&mut self.pin_request,
 								),
+								state
+									.can_inbox()
+									.then_some((&mut self.save_request, &mut self.reminder_custom)),
 								(can_thread, &mut self.thread_request),
 								(state.can_forward(id), &mut self.forward_request),
 								message
@@ -7066,6 +7106,7 @@ mod tests {
 							(&mut editing, &mut edit_started),
 							&mut deleting,
 							(false, false, &mut None),
+							None,
 							(own, &mut thread_request),
 							(false, &mut None),
 							None,

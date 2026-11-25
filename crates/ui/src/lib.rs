@@ -658,6 +658,8 @@ pub struct MessagingUi {
 	pub open_log_folder_requested: bool,
 	/// Header pin button rect while the pins popout is open.
 	pins_anchor: Option<egui::Rect>,
+	/// Header inbox button rect while the inbox popout is open.
+	inbox_anchor: Option<egui::Rect>,
 	editing: Option<(Id, Id, String)>,
 	composer_edit: Option<(Id, Id)>,
 	edit_sent: Option<SubmittedEdit>,
@@ -3183,6 +3185,23 @@ impl MessagingUi {
 			});
 	}
 
+	/// Tray button opening the Inbox popout; the right-most header action.
+	fn inbox_button(&mut self, ui: &mut egui::Ui) {
+		let response = icons::toggle(
+			ui,
+			icons::Icon::Inbox,
+			32.0,
+			self.search.inbox_open(),
+			"inbox",
+		);
+		if response.clicked() {
+			self.search.toggle_inbox();
+		}
+		if self.search.inbox_open() {
+			self.inbox_anchor = Some(response.rect);
+		}
+	}
+
 	/// The header's avatar, name and actions; the DM call stage draws it over the call.
 	pub(crate) fn channel_header_row(
 		&mut self,
@@ -3297,6 +3316,7 @@ impl MessagingUi {
 			}
 			ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
 				ui.spacing_mut().item_spacing.x = 4.0;
+				self.inbox_button(ui);
 				if selected_voice
 					&& icons::toggle(
 						ui,
@@ -6685,6 +6705,23 @@ impl MessagingUi {
 		{
 			commands.push(command);
 		}
+		if let Some((channel, message, due_at)) = self.timeline.save_request.take()
+			&& let Some(command) = state.prepare_inbox_write(client_core::inbox::Write::Save {
+				channel,
+				message,
+				due_at,
+				source: client_core::inbox::Source::ContextMenu,
+			}) {
+			commands.push(command);
+		}
+		if let Some((channel, message)) = self.timeline.reminder_custom.take() {
+			self.search.open_reminder(
+				channel,
+				message,
+				None,
+				client_core::inbox::Source::ContextMenu,
+			);
+		}
 		if let Some((channel, message, skip)) = self.timeline.suppress_embeds.take() {
 			if !skip {
 				self.suppressing = Some((channel, message));
@@ -6730,6 +6767,36 @@ impl MessagingUi {
 			if !(self.search.open && self.search.pins()) {
 				self.pins_anchor = None;
 			}
+		}
+		if let Some(anchor) = self.inbox_anchor {
+			self.search.inbox_popout(
+				ui,
+				state,
+				anchor,
+				&mut commands,
+				&mut self.avatars,
+				search::MediaUi {
+					download: &mut self.timeline.download,
+					audio: &mut self.timeline.audio,
+					video: &mut self.timeline.video,
+				},
+				&mut self.profile,
+			);
+			if !self.search.inbox_open() {
+				self.inbox_anchor = None;
+			}
+		}
+		self.search.reminder_dialog(&ctx, state, &mut commands);
+		if std::mem::take(&mut state.inbox_changed)
+			&& self.search.inbox_open()
+			&& let Some(tab) = state.inbox.as_ref().map(|v| v.tab).filter(|tab| {
+				matches!(
+					tab,
+					client_core::inbox::Tab::Bookmarks | client_core::inbox::Tab::Reminders
+				)
+			}) && let Some(command) = state.open_inbox(tab)
+		{
+			commands.push(command);
 		}
 		if let Some(link) = self.search.opening.take() {
 			self.timeline.opening = Some(link);

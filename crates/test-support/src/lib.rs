@@ -2223,6 +2223,96 @@ mod tests {
 		assert!(state.request_pins().is_none());
 	}
 	#[test]
+	fn inbox_reads_drop_stale_results_and_writes_are_serialized() {
+		use client_core::{
+			Command,
+			inbox::{Outcome, Tab, Write},
+		};
+		use model::inbox::{InboxItem, InboxPage};
+		let mut state = demo_state();
+		let page = || InboxPage {
+			items: vec![InboxItem {
+				hit: SearchHit {
+					id: Id(480),
+					channel: Id(20),
+					author: crate::message(1, Id(20)).author,
+					mentions: vec![],
+					excerpt: "saved".into(),
+					attachments: vec![],
+					embeds: vec![],
+					forwarded: false,
+					forward_origin: None,
+				},
+				guild: None,
+				saved_at: Some(1),
+				due_at: None,
+			}],
+			more: false,
+		};
+		let Command::Inbox {
+			request: old,
+			read: old_read,
+		} = state.open_inbox(Tab::Mentions).unwrap()
+		else {
+			panic!()
+		};
+		let Command::Inbox { request, read } = state.open_inbox(Tab::Bookmarks).unwrap() else {
+			panic!()
+		};
+		state.apply_inbox(old, old_read, Ok(Outcome::Page(page())));
+		let view = state.inbox.as_ref().unwrap();
+		assert!(view.loading && view.page.is_none());
+		state.apply_inbox(request, read, Ok(Outcome::Page(page())));
+		assert_eq!(
+			state
+				.inbox
+				.as_ref()
+				.unwrap()
+				.page
+				.as_ref()
+				.unwrap()
+				.items
+				.len(),
+			1
+		);
+		let unsave = Write::Unsave {
+			channel: Id(20),
+			message: Id(480),
+		};
+		let first = state.prepare_inbox_write(unsave).unwrap();
+		assert!(state.prepare_inbox_write(unsave).is_none());
+		assert!(state.status.starts_with("Wait"));
+		state.command_rejected(first);
+		assert_eq!(
+			state
+				.inbox
+				.as_ref()
+				.unwrap()
+				.page
+				.as_ref()
+				.unwrap()
+				.items
+				.len(),
+			1
+		);
+		let Command::InboxWrite { request, write } = state.prepare_inbox_write(unsave).unwrap()
+		else {
+			panic!()
+		};
+		state.apply_inbox_write(request, write, Ok(()));
+		assert!(
+			state
+				.inbox
+				.as_ref()
+				.unwrap()
+				.page
+				.as_ref()
+				.unwrap()
+				.items
+				.is_empty()
+		);
+	}
+	#[test]
 	fn numbered_search_pages_preserve_scope_retry_and_bound_retained_results() {
 		use client_core::{Command, auth::Failure, search::Outcome};
 		let mut state = demo_state();

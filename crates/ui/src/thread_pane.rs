@@ -1135,6 +1135,9 @@ impl ThreadPaneUi {
 				state.is_pinned(message.channel, id),
 				&mut timeline.pin_request,
 			),
+			state
+				.can_inbox()
+				.then_some((&mut timeline.save_request, &mut timeline.reminder_custom)),
 			(false, &mut no_thread),
 			(state.can_forward(id), &mut timeline.forward_request),
 			message

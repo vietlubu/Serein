@@ -5234,6 +5234,49 @@ reading-chat-reading-settings-hide-blocked-messages-description = 이 기기의 
 reading-chat-reading-settings-hide-ignored-messages = 무시한 사용자의 메시지도 숨기기
 # Context: reading_chat
 reading-chat-reading-settings-hide-ignored-messages-description = 무시한 작성자도 로컬 필터에 포함합니다. 관계 상태를 알 수 없으면 메시지를 숨기지 않습니다.
+# Context: inbox
+inbox = 받은 편지함
+inbox-close = 받은 편지함 닫기
+inbox-reload = 받은 편지함 새로고침
+inbox-tab-unread = 읽지 않음
+inbox-tab-mentions = 멘션
+inbox-tab-bookmarks = 북마크
+inbox-tab-reminders = 리마인더
+inbox-unavailable = 연결이 끊긴 동안에는 받은 편지함을 사용할 수 없어요.
+inbox-loading = 받은 편지함 불러오는 중
+inbox-older-mentions = 이전 멘션
+inbox-older-bookmarks = 이전 북마크
+inbox-retry = 다시 시도
+inbox-mark-read = 읽음으로 표시
+inbox-remove-bookmark = 북마크 삭제
+inbox-complete-reminder = 완료로 표시
+inbox-edit-reminder = 리마인더 수정
+inbox-reminder-due = 예정: { $time }
+inbox-reminder-overdue = 기한 지남 · { $time }
+inbox-unknown-conversation = 알 수 없는 대화
+inbox-unread-loading = 읽지 않은 메시지 불러오는 중
+inbox-unread-none-loaded = 미리 볼 읽지 않은 메시지가 없어요.
+inbox-empty-unread-title = 모두 확인했어요
+inbox-empty-unread-detail = 읽지 않은 대화가 여기에 표시돼요.
+inbox-empty-mentions-title = 최근 멘션 없음
+inbox-empty-mentions-detail = 최근 7일간의 멘션이 여기에 표시돼요.
+inbox-empty-bookmarks-title = 북마크 없음
+inbox-empty-bookmarks-detail = 메시지를 우클릭하고 메시지 북마크를 선택하세요.
+inbox-empty-reminders-title = 리마인더 없음
+inbox-empty-reminders-detail = 메시지를 우클릭하고 리마인더 만들기를 선택하세요.
+timeline-message-actions-bookmark-message = 메시지 북마크
+timeline-message-actions-create-reminder = 리마인더 만들기
+inbox-remind-20-minutes = 20분 후
+inbox-remind-1-hour = 1시간 후
+inbox-remind-3-hours = 3시간 후
+inbox-remind-tomorrow = 내일 9:00
+inbox-remind-next-week = 다음 주 9:00
+inbox-remind-custom = 직접 설정…
+inbox-reminder-title = 리마인더
+inbox-reminder-time = 날짜와 시간 (YYYY-MM-DD HH:MM)
+inbox-reminder-save = 리마인더 저장
+inbox-reminder-invalid = YYYY-MM-DD HH:MM 형식으로 입력하세요.
+inbox-reminder-past = 미래의 시간을 선택하세요.
 
 
 # Native sign-in form (email, password, MFA and QR code).

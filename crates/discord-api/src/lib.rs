@@ -13,6 +13,7 @@ mod forum;
 mod gif_favorites;
 mod group_actions;
 mod guild_folders;
+mod inbox;
 mod interactions;
 pub mod login;
 mod message_options;
@@ -1751,6 +1752,16 @@ impl DiscordApi {
 				}
 			}
 			Command::CancelSearch => Event::Failure(Failure::Protocol),
+			Command::Inbox { request, read } => Event::Inbox {
+				request,
+				read,
+				result: self.inbox(read).await,
+			},
+			Command::InboxWrite { request, write } => Event::InboxWritten {
+				request,
+				write,
+				result: self.inbox_write(write).await,
+			},
 			Command::Gifs { query, request } => Event::Gifs {
 				request,
 				result: self.gifs(query.as_deref()).await,

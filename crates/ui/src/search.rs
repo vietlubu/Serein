@@ -10,6 +10,9 @@ const FILTER_WIDTH: f32 = 444.0;
 mod date_picker;
 #[path = "search_filters.rs"]
 mod filters;
+#[path = "search_inbox.rs"]
+mod inbox;
+pub(crate) use inbox::RemindAt;
 
 #[derive(Default)]
 pub struct SearchUi {
@@ -51,6 +54,10 @@ pub struct SearchUi {
 		String,
 		crate::extensions_ui::MessageTarget,
 	)>,
+	/// The Inbox popout shares this pane's card renderer and caches; it is exclusive with it.
+	inbox_open: bool,
+	inbox_tab: client_core::inbox::Tab,
+	reminder: Option<inbox::ReminderDraft>,
 }
 
 impl SearchUi {
@@ -145,6 +152,18 @@ impl SearchUi {
 		{
 			self.open = false;
 			self.filters_open = false;
+		} else if self.inbox_open
+			&& self.reminder.is_none()
+			&& self.viewing.is_none()
+			&& ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
+		{
+			self.inbox_open = false;
+		}
+		if self.open {
+			self.inbox_open = false;
+		}
+		if !self.inbox_open && state.inbox.is_some() {
+			state.close_inbox();
 		}
 		if self.channel != state.selected {
 			self.channel = state.selected;
@@ -156,9 +175,19 @@ impl SearchUi {
 			}
 		}
 		if !self.open {
-			self.formats.retain(|_| false);
-			self.previews.clear();
-			self.viewing = None;
+			if self.inbox_open {
+				let view = state.inbox.as_ref();
+				let shown = |id: Id| view.is_some_and(|v| v.contains(id));
+				self.formats.retain(shown);
+				self.previews.retain(|id, _| shown(*id));
+				if self.viewing.is_some_and(|(message, _)| !shown(message)) {
+					self.viewing = None;
+				}
+			} else {
+				self.formats.retain(|_| false);
+				self.previews.clear();
+				self.viewing = None;
+			}
 			self.filters_open = false;
 			self.filter_draft = None;
 			if state.search.is_some() {
@@ -1718,7 +1747,11 @@ impl SearchUi {
 		let card_id = ui.scope_id().with("card");
 		let previous = ui.data(|data| data.get_temp::<egui::Rect>(card_id));
 		let background = previous.map(|rect| ui.interact(rect, card_id, egui::Sense::click()));
-		let jumpable = state.can_search() && hit.id.0 < u64::MAX;
+		let jumpable = if self.inbox_open {
+			state.can_inbox()
+		} else {
+			state.can_search()
+		} && hit.id.0 < u64::MAX;
 		let hot = background.as_ref().is_some_and(|response| {
 			ui.rect_contains_pointer(response.rect) || response.has_focus()
 		});
